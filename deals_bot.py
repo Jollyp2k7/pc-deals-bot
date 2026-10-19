@@ -23,12 +23,13 @@ Configurazione: variabili d'ambiente o file .env
   BASELINE_PCT=75          percentile dei prezzi osservati usato come "prezzo normale"
   HISTORY_DAYS=90          finestra temporale dello storico (giorni)
   REF_FILE=reference_prices.json   prezzi di riferimento manuali (opzionale, vedi sotto)
-  SEND_ALL=1               1 = invia TUTTE le segnalazioni dei canali Telegram (senza filtri di categoria, negozio, paese, duplicati)
+  SEND_ALL=pc              pc = tutte le segnalazioni di componenti PC dei canali (predefinito) | all = ogni post | hw = ogni post dei canali hardware | 0 = filtri attivi
   MAX_PER_RUN=40           massimo di messaggi per esecuzione (il resto va al giro successivo); SEND_DELAY=2.1 = pausa in secondi
   CURATED_SEND=1           1 = invia le segnalazioni dei canali Telegram curati; 0 = solo sconti/prezzi anomali
   COUNTRIES=it,es,fr,de    marketplace ammessi per i canali Telegram (de = Amazon.de)
   EXTRA_CATEGORIES=1       1 = include accessori PC e rete; 0 = solo le categorie principali
   EXCLUDE_USED=0           1 = scarta le offerte Amazon Seconda Mano
+  REPEAT_HOURS=0           >0 = anche in modalita' SEND_ALL non reinvia il post identico (stesso canale, titolo e prezzo) entro N ore
   DEDUPE_HOURS=24          finestra anti-duplicati tra fonti; REPRICE_DROP=3 = % di ribasso per rinviare l'offerta
   SEND_UNKNOWN=0           1 = invia anche componenti PC di cui non si ricava lo sconto
   MERCHANT_ALLOW=amazon    negozi ammessi (separati da virgola); "*" = tutti i negozi
@@ -108,13 +109,17 @@ STATE_FILE = Path(env("STATE_FILE", "deals_state.json"))
 LOOP = env("LOOP", "0") == "1"
 INTERVAL = max(60, int(env("INTERVAL_SECONDS", "300")))
 MAX_SEEN = 8000
-_sa = env("SEND_ALL", "all").lower()
-SEND_ALL = "all" if _sa in ("1", "true", "all") else ("hw" if _sa == "hw" else "0")
-# all = invia TUTTE le segnalazioni di tutti i canali Telegram | hw = tutto dai soli canali dedicati all'hardware | 0 = filtri attivi
+_sa = env("SEND_ALL", "pc").lower()
+SEND_ALL = "all" if _sa in ("1", "true", "all") else ("hw" if _sa == "hw" else ("pc" if _sa == "pc" else "0"))
+# pc  = (predefinita) TUTTE le segnalazioni di componenti/periferiche PC di tutti i canali, senza soglie di sconto,
+#       senza deduplicazione e senza filtro paese; resta il filtro categoria e il filtro negozio (solo Amazon)
+# all = ogni post con link, di qualsiasi categoria | hw = "all" solo per i canali dedicati all'hardware
+# 0   = filtri attivi (categoria, Amazon, paesi, duplicati)
 MAX_PER_RUN = int(env("MAX_PER_RUN", "40"))              # massimo di messaggi per esecuzione; il resto va al giro successivo
 SEND_DELAY = float(env("SEND_DELAY", "2.1"))             # pausa tra messaggi (Discord: max 30 al minuto per webhook)
 CURATED_SEND = env("CURATED_SEND", "1") == "1"       # 1 = invia le segnalazioni dei canali curati anche senza sconto calcolabile
 EXCLUDE_USED = env("EXCLUDE_USED", "0") == "1"            # 1 = scarta le offerte Amazon Seconda Mano (canali Telegram)
+REPEAT_HOURS = float(env("REPEAT_HOURS", "0"))             # 0 = disattivato; >0 = non reinvia lo STESSO post identico (canale+titolo+prezzo) entro N ore
 DEDUPE_HOURS = float(env("DEDUPE_HOURS", "24"))          # finestra anti-duplicati tra fonti diverse
 REPRICE_DROP = float(env("REPRICE_DROP", "3"))           # % di ulteriore ribasso per rinviare la stessa offerta
 ALLOWED_COUNTRIES = [c.strip().lower() for c in env("COUNTRIES", "it,es,fr,de").split(",") if c.strip()]  # solo canali Telegram
@@ -190,7 +195,7 @@ ERROR_KEYWORDS_RE = re.compile(
 ORIG_RE = re.compile(
     r"(?:antes|pvp|precio\s+(?:habitual|original|anterior|recomendado|medio)|"
     r"prix\s+(?:habituel|initial|conseill[eé]|moyen)|au\s+lieu\s+de|pvc|"
-    r"invece\s+(?:di|dei|del|degli)|prezzo\s+(?:di\s+listino|consigliato|precedente|originale|medio)|"
+    r"invece\s+(?:di|dei|del|degli)|anzich[eè]|prezzo\s+(?:di\s+listino|consigliato|precedente|originale|medio)|"
     r"listino|rrp|msrp|normalmente)"
     r"\s*:?\s*(?:di\s+|dei\s+)?(\d[\d.,]*)", re.I)
 ORIG_BEFORE_RE = re.compile(r"(\d[\d.,]*)\s?(?:€|eur|euro)\s+di\s+listino", re.I)
@@ -241,10 +246,11 @@ FLAG_MAP = {"\U0001F1EE\U0001F1F9": "it", "\U0001F1EA\U0001F1F8": "es", "\U0001F
             "\U0001F1E9\U0001F1EA": "de", "\U0001F1EC\U0001F1E7": "uk", "\U0001F1FA\U0001F1F8": "us"}
 DOMAIN_COUNTRY = {"amazon.it": "it", "amazon.es": "es", "amazon.fr": "fr", "amazon.de": "de", "amazon.co.uk": "uk"}
 INVISIBLE_RE = re.compile(r"[\u200b-\u200d\u2060-\u2064\ufeff\ufe0f]")
+IMAGE_LINK_RE = re.compile(r"media-amazon\.|ssl-images-amazon|/images/|\.(?:jpe?g|png|webp|gif)(?:\?|$)", re.I)
 AMAZON_LINK_RE = re.compile(r"amzlink|link\.amazon|amzn\.|amazon\.(?:it|es|fr|de|co\.uk|com)")
 EURO = r"(\d[\d.,]*)\s?\u20ac"
 TG_FINAL_PRICE_RE = re.compile(r"\u27a1\ufe0f?\s*" + EURO)                       # prezzo finale dopo coupon
-TG_PAIR_RE = re.compile(EURO + r"\s+invece\s+di\s+" + EURO, re.I)             # "53,18 EUR invece di 79,99 EUR"
+TG_PAIR_RE = re.compile(EURO + r"\s+(?:invece\s+di|anzich[eè])\s+(?:\S{0,3}\s*)?" + EURO, re.I)             # "53,18 EUR invece di 79,99 EUR"
 TG_PRICE_RE = re.compile(r"Prezzo:\s*" + EURO, re.I)
 TG_STATE_RE = re.compile(r"(?:usato|nuovo)\s+(?:a\s+)?" + EURO, re.I)          # "Disponibile usato a 707,45 EUR"
 TG_ANY_EURO_RE = re.compile(EURO)
@@ -291,7 +297,9 @@ def fetch_tg(feed):
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
     items = []
-    pass_all = SEND_ALL == "all" or (SEND_ALL == "hw" and bool(feed.get("hw")))
+    hw_all = SEND_ALL == "hw" and bool(feed.get("hw"))
+    any_category = SEND_ALL == "all" or hw_all          # accetta anche prodotti non PC
+    pass_all = SEND_ALL in ("all", "pc") or hw_all       # niente filtri paese/usato/duplicati
     for m in soup.select("div.tgme_widget_message"):
         text_el = m.select_one(".tgme_widget_message_text")
         post = m.get("data-post")
@@ -303,11 +311,12 @@ def fetch_tg(feed):
         if len(re.findall(r"Prezzo:", full)) >= 2 and not pass_all:
             continue   # messaggio con piu' prodotti: non assegnabile a un solo prezzo
         title, rest = _tg_split(lines)
+        title = re.sub(r"\s*(?:#ad\b.*|disclaimer.*|-\s*info\s*|-\s*affiliate.*)$", "", title, flags=re.I).strip(" -|")
         rest_txt = " ".join(rest)
         if len(title) < 6:
             continue
         hrefs = [a.get("href", "") for a in m.select("a[href]")]
-        shop = next((u for u in hrefs if AMAZON_LINK_RE.search(u)), None)
+        shop = next((u for u in hrefs if AMAZON_LINK_RE.search(u) and not IMAGE_LINK_RE.search(u)), None)
         post_url = f"https://t.me/{post}"
         link = shop or (post_url if re.search(r"acquista su amazon", full, re.I) else None)
         if not link:
@@ -330,7 +339,7 @@ def fetch_tg(feed):
             "guid": post, "title": title, "link": link, "post": post_url,
             "feed_category": "", "merchant": merchant, "price_txt": price_txt,
             "price": parse_price(price_txt), "desc": full, "source": feed["name"],
-            "curated": bool(feed.get("curated")), "pass_all": pass_all,
+            "curated": bool(feed.get("curated")), "pass_all": pass_all, "any_category": any_category,
             "ts": (m.select_one("time").get("datetime") if m.select_one("time") else ""),
         })
     items.reverse()   # dal piu' recente al piu' vecchio, come i feed RSS
@@ -530,6 +539,13 @@ def record_price(item):
     del hist[:-HISTORY_LEN]
 
 
+REPEATS = {}   # "canale|titolo|prezzo" -> timestamp dell'ultimo invio
+
+
+def _repeat_key(item):
+    return f"{item['source']}|{item['title'][:80]}|{item['price']}"
+
+
 SENT = []   # offerte gia' inviate: [timestamp, prezzo, categoria, condizione, model_key, token]
 
 
@@ -544,7 +560,11 @@ def _condition(item):
 def is_duplicate(item, cat):
     """Stessa offerta gia' inviata (anche da un'altra fonte) nelle ultime DEDUPE_HOURS ore, salvo ulteriore ribasso."""
     if item.get("pass_all"):
-        return False   # modalita' "invia tutto": nessuna deduplicazione
+        # modalita' "invia tutto": nessuna deduplicazione tra fonti; opzionalmente blocca solo il post IDENTICO ripetuto
+        if REPEAT_HOURS <= 0:
+            return False
+        ts = REPEATS.get(_repeat_key(item))
+        return bool(ts and time.time() - ts < REPEAT_HOURS * 3600)
     now, price, cond = time.time(), item["price"], _condition(item)
     mk, tk = model_key(item["title"], cat), _tokens(item["title"])
     for ts, p, c, cd, k, toks in SENT:
@@ -560,6 +580,10 @@ def is_duplicate(item, cat):
 
 
 def mark_sent(item, cat):
+    REPEATS[_repeat_key(item)] = time.time()
+    if len(REPEATS) > 800:
+        for k in sorted(REPEATS, key=REPEATS.get)[:200]:
+            REPEATS.pop(k, None)
     SENT.append([time.time(), item["price"] or 0, cat, _condition(item),
                  model_key(item["title"], cat), sorted(_tokens(item["title"]))])
     del SENT[:-400]
@@ -587,9 +611,9 @@ def below_floor(item, cat):
 
 def evaluate(item):
     """Ritorna None oppure dict con la decisione di invio."""
-    pass_all = bool(item.get("pass_all"))
-    cat = classify(item["title"]) or ("Altro" if pass_all else None)
-    if not cat or not (pass_all or merchant_allowed(item["merchant"])):
+    any_cat = bool(item.get("any_category"))
+    cat = classify(item["title"]) or ("Altro" if any_cat else None)
+    if not cat or not (any_cat or merchant_allowed(item["merchant"])):
         return None
     discount, orig = extract_discount(item["title"], item["desc"], item["price"])
     text = f"{item['title']} {item['desc'][:400]}"
@@ -704,12 +728,13 @@ def load_state():
     for key, entries in data.get("prices", {}).items():   # migra il formato precedente (solo prezzi)
         PRICE_HISTORY[key] = [e if isinstance(e, list) else [now, float(e), "p"] for e in entries]
     SENT[:] = [e for e in data.get("sent", []) if isinstance(e, list) and len(e) == 6]
+    REPEATS.update(data.get("repeats", {}))
     return data.get("seen", [])
 
 
 def save_state(seen):
     prices = dict(list(PRICE_HISTORY.items())[-3000:])
-    STATE_FILE.write_text(json.dumps({"seen": seen[-MAX_SEEN:], "prices": prices, "sent": SENT[-400:]}))
+    STATE_FILE.write_text(json.dumps({"seen": seen[-MAX_SEEN:], "prices": prices, "sent": SENT[-400:], "repeats": REPEATS}))
 
 # ----------------------------------------------------------------------------
 # MAIN
