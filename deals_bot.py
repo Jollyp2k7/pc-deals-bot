@@ -23,6 +23,10 @@ Configurazione: variabili d'ambiente o file .env
   BASELINE_PCT=75          percentile dei prezzi osservati usato come "prezzo normale"
   HISTORY_DAYS=90          finestra temporale dello storico (giorni)
   REF_FILE=reference_prices.json   prezzi di riferimento manuali (opzionale, vedi sotto)
+  CURATED_SEND=1           1 = invia le segnalazioni dei canali Telegram curati; 0 = solo sconti/prezzi anomali
+  COUNTRIES=it,es,fr       marketplace ammessi per i canali Telegram
+  EXCLUDE_USED=0           1 = scarta le offerte Amazon Seconda Mano
+  DEDUPE_HOURS=24          finestra anti-duplicati tra fonti; REPRICE_DROP=3 = % di ribasso per rinviare l'offerta
   SEND_UNKNOWN=0           1 = invia anche componenti PC di cui non si ricava lo sconto
   MERCHANT_ALLOW=amazon    negozi ammessi (separati da virgola); "*" = tutti i negozi
   MERCHANT_BLOCK=          negozi esclusi (separati da virgola)
@@ -53,10 +57,19 @@ except ImportError:
 # CONFIG
 # ----------------------------------------------------------------------------
 FEEDS = [
-    # Verificati: Chollometro (ES) e Dealabs (FR) -> RSS Pepper; Tom's Hardware IT -> Atom (offerte redazionali)
+    # Feed RSS/Atom (verificati)
     {"name": "Chollometro (ES)", "url": "https://www.chollometro.com/rss"},
     {"name": "Dealabs (FR)", "url": "https://www.dealabs.com/rss"},
     {"name": "Tom's Hardware (IT)", "url": "https://www.tomshw.it/feed/offerte"},
+    # Canali Telegram pubblici di offerte Amazon, letti dall'anteprima web pubblica (t.me/s/<canale>).
+    # "curated": le segnalazioni sono selezionate dal canale -> vengono inviate anche senza sconto calcolabile.
+    {"name": "Prodigeek Offerte (Telegram)", "type": "tgchannel", "channel": "prodigeekOfferte", "curated": True},
+    {"name": "JustTrack It (Telegram)", "type": "tgchannel", "channel": "JustTrackIt", "curated": True},
+    {"name": "AssemblarePCOnline (Telegram)", "type": "tgchannel", "channel": "assemblarepconline", "curated": True},
+    {"name": "VereOfferteTech (Telegram)", "type": "tgchannel", "channel": "vereoffertetech", "curated": True},
+    {"name": "MoreThanTech (Telegram)", "type": "tgchannel", "channel": "MTTVIDEO", "curated": True},
+    {"name": "Prophecy Tech (Telegram)", "type": "tgchannel", "channel": "nexthardwareofferte", "curated": True},
+    {"name": "Prezz.one (Telegram)", "type": "tgchannel", "channel": "Prezzone", "curated": True},
 ]
 
 def env(key, default=None):
@@ -73,6 +86,11 @@ STATE_FILE = Path(env("STATE_FILE", "deals_state.json"))
 LOOP = env("LOOP", "0") == "1"
 INTERVAL = max(60, int(env("INTERVAL_SECONDS", "300")))
 MAX_SEEN = 3000
+CURATED_SEND = env("CURATED_SEND", "1") == "1"       # 1 = invia le segnalazioni dei canali curati anche senza sconto calcolabile
+EXCLUDE_USED = env("EXCLUDE_USED", "0") == "1"            # 1 = scarta le offerte Amazon Seconda Mano (canali Telegram)
+DEDUPE_HOURS = float(env("DEDUPE_HOURS", "24"))          # finestra anti-duplicati tra fonti diverse
+REPRICE_DROP = float(env("REPRICE_DROP", "3"))           # % di ulteriore ribasso per rinviare la stessa offerta
+ALLOWED_COUNTRIES = [c.strip().lower() for c in env("COUNTRIES", "it,es,fr").split(",") if c.strip()]  # solo canali Telegram
 PRICE_DROP = float(env("PRICE_DROP", "35"))      # % sotto il prezzo di riferimento -> "prezzo anomalo"
 MIN_SAMPLES = int(env("MIN_SAMPLES", "4"))       # prezzi osservati minimi per costruire il riferimento
 HISTORY_LEN = 60                                 # voci di storico conservate per prodotto
@@ -108,13 +126,22 @@ CATEGORIES = {
     "Cuffie": [r"auriculares", r"\bcasque\b", r"cuffie", r"headset", r"headphones"],
     "Mouse": [r"\bmouse\b", r"\brat[oó]n\b", r"\bsouris\b"],
     "Microfono": [r"micr[oó]fono", r"microphone", r"microfono"],
+    "SSD / disco": [r"\bssd\b", r"\bnvme\b", r"\bm\.2\b", r"hard\s?disk", r"disque\s+dur", r"disco\s+duro"],
+    "Raffreddamento": [r"dissipatore", r"raffreddamento\s+(?:a\s+)?liquido", r"\baio\b", r"ventola", r"ventilador",
+                       r"ventirad", r"watercooling"],
+    "Case": [r"\bcase\s+(?:pc|gaming)", r"pc\s+(?:gaming\s+)?case", r"mid[- ]?tower", r"full[- ]?tower",
+             r"bo[iî]tier\s+pc", r"torre\s+pc"],
+    "Webcam": [r"\bwebcam\b"],
 }
+_PRIORITY = ("Raffreddamento", "Case", "SSD / disco")
+CATEGORIES = {**{k: CATEGORIES[k] for k in _PRIORITY}, **{k: v for k, v in CATEGORIES.items() if k not in _PRIORITY}}
 CATEGORY_RE = {c: re.compile("|".join(p), re.I) for c, p in CATEGORIES.items()}
 
 # Falsi positivi comuni (monitor per bebe', per pressione ecc.)
 EXCLUDE_RE = re.compile(
     r"beb[eé]|\bbaby\b|b[eé]b[eé]|tensi[oó]n\s+arterial|presi[oó]n\s+arterial|gluc[oó]|"
     r"tension\s+art[eé]rielle|pressione|\bgatos?\b|\bperros?\b|"
+    r"\bmini\s?pc\b|gaming\s+pc\b|pc\s+(?:desktop|fisso|gaming\s+completo)|desktop\s+pc|barebone|pc\s+portable|port[aá]til|portatile|\blaptop\b|\bnotebook\b|\bzenbook\b|\bmacbook\b|"
     r"bras\s+articul|\bbrazo\b|\bsoporte\b|\bsupporto\b|braccio\s+(?:per|monitor)|alfombrilla|\bfunda\b|housse", re.I)
 
 ERROR_KEYWORDS_RE = re.compile(
@@ -170,7 +197,94 @@ def parse_price(text):
         return None
 
 
+FLAG_RE = re.compile(r"[\U0001F1E6-\U0001F1FF]{2}")
+FLAG_MAP = {"\U0001F1EE\U0001F1F9": "it", "\U0001F1EA\U0001F1F8": "es", "\U0001F1EB\U0001F1F7": "fr",
+            "\U0001F1E9\U0001F1EA": "de", "\U0001F1EC\U0001F1E7": "uk", "\U0001F1FA\U0001F1F8": "us"}
+DOMAIN_COUNTRY = {"amazon.it": "it", "amazon.es": "es", "amazon.fr": "fr", "amazon.de": "de", "amazon.co.uk": "uk"}
+INVISIBLE_RE = re.compile(r"[\u200b-\u200d\u2060-\u2064\ufeff\ufe0f]")
+AMAZON_LINK_RE = re.compile(r"amzlink|link\.amazon|amzn\.|amazon\.(?:it|es|fr|de|co\.uk|com)")
+EURO = r"(\d[\d.,]*)\s?\u20ac"
+TG_FINAL_PRICE_RE = re.compile(r"\u27a1\ufe0f?\s*" + EURO)                       # prezzo finale dopo coupon
+TG_PAIR_RE = re.compile(EURO + r"\s+invece\s+di\s+" + EURO, re.I)             # "53,18 EUR invece di 79,99 EUR"
+TG_PRICE_RE = re.compile(r"Prezzo:\s*" + EURO, re.I)
+TG_STATE_RE = re.compile(r"(?:usato|nuovo)\s+(?:a\s+)?" + EURO, re.I)          # "Disponibile usato a 707,45 EUR"
+TG_ANY_EURO_RE = re.compile(EURO)
+
+
+def _is_marker(line):
+    """Riga fatta solo di emoji/simboli (separatori dei messaggi dei canali)."""
+    clean = re.sub(r"\s", "", INVISIBLE_RE.sub("", line))
+    return bool(clean) and not re.search(r"[A-Za-z0-9]", clean) and clean not in ("\u2122", "\u00ae")
+
+
+def _tg_split(lines):
+    """Divide il messaggio in (titolo, righe_successive). Il titolo e' il testo prima del primo separatore."""
+    parts, i = [], 0
+    for i, ln in enumerate(lines):
+        if _is_marker(ln) or ln.startswith("http"):
+            if parts:
+                break
+            continue
+        parts.append(ln)
+    else:
+        i = len(lines)
+    title = re.sub(r"\s+", " ", " ".join(parts)).replace("\u2122", "").replace("\u00ae", "").strip()
+    return title, lines[i:]
+
+
+def fetch_tg(feed):
+    """Legge l'anteprima web pubblica di un canale Telegram (https://t.me/s/<canale>)."""
+    r = requests.get(f"https://t.me/s/{feed['channel']}", headers=HEADERS, timeout=25)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    items = []
+    for m in soup.select("div.tgme_widget_message"):
+        text_el = m.select_one(".tgme_widget_message_text")
+        post = m.get("data-post")
+        if not text_el or not post:
+            continue
+        lines = [INVISIBLE_RE.sub("", ln).strip() for ln in text_el.get_text("\n", strip=True).split("\n")]
+        lines = [ln for ln in lines if ln]
+        full = " ".join(lines)
+        if len(re.findall(r"Prezzo:", full)) >= 2:
+            continue   # messaggio con piu' prodotti: non assegnabile a un solo prezzo
+        title, rest = _tg_split(lines)
+        rest_txt = " ".join(rest)
+        if len(title) < 6:
+            continue
+        hrefs = [a.get("href", "") for a in m.select("a[href]")]
+        shop = next((u for u in hrefs if AMAZON_LINK_RE.search(u)), None)
+        post_url = f"https://t.me/{post}"
+        link = shop or (post_url if re.search(r"acquista su amazon", full, re.I) else None)
+        if not link:
+            continue   # nessun link di acquisto (video, promemoria, ecc.)
+        mp = (TG_FINAL_PRICE_RE.search(rest_txt) or TG_PAIR_RE.search(rest_txt) or TG_PRICE_RE.search(rest_txt)
+              or TG_STATE_RE.search(rest_txt) or TG_ANY_EURO_RE.search(rest_txt))
+        price_txt = (mp.group(1) + "\u20ac") if mp else None
+        flag = FLAG_RE.search(full)
+        country = FLAG_MAP.get(flag.group(0)) if flag else None
+        if not country and shop:
+            country = next((c for dom, c in DOMAIN_COUNTRY.items() if dom in shop), None)
+        if country and ALLOWED_COUNTRIES and country not in ALLOWED_COUNTRIES:
+            continue   # marketplace non richiesto (es. Amazon.de)
+        used = bool(re.search(r"\busato\b|seconda mano", full, re.I)) and not re.search(r"nuovo a\s", full, re.I)
+        if used and EXCLUDE_USED:
+            continue
+        is_amazon = bool(shop) or "amazon" in full.lower()
+        merchant = ("Amazon" + (" (usato)" if used else "")) if is_amazon else ("AliExpress" if "aliexpress" in " ".join(hrefs) else "")
+        items.append({
+            "guid": post, "title": title, "link": link, "post": post_url,
+            "feed_category": "", "merchant": merchant, "price_txt": price_txt,
+            "price": parse_price(price_txt), "desc": full, "source": feed["name"],
+            "curated": bool(feed.get("curated")),
+        })
+    items.reverse()   # dal piu' recente al piu' vecchio, come i feed RSS
+    return items
+
+
 def fetch_items(feed):
+    if feed.get("type") == "tgchannel":
+        return fetch_tg(feed)
     r = requests.get(feed["url"], headers=HEADERS, timeout=25)
     r.raise_for_status()
     head = r.content[:400].lower()
@@ -352,6 +466,39 @@ def record_price(item):
     del hist[:-HISTORY_LEN]
 
 
+SENT = []   # offerte gia' inviate: [timestamp, prezzo, categoria, condizione, model_key, token]
+
+
+def _tokens(title):
+    return {t for t in re.findall(r"[a-z0-9]{3,}", title.lower()) if not GENERIC_TOKEN_RE.match(t)}
+
+
+def _condition(item):
+    return "u" if "(usato)" in item["merchant"] else "n"
+
+
+def is_duplicate(item, cat):
+    """Stessa offerta gia' inviata (anche da un'altra fonte) nelle ultime DEDUPE_HOURS ore, salvo ulteriore ribasso."""
+    now, price, cond = time.time(), item["price"], _condition(item)
+    mk, tk = model_key(item["title"], cat), _tokens(item["title"])
+    for ts, p, c, cd, k, toks in SENT:
+        if now - ts > DEDUPE_HOURS * 3600 or c != cat or cd != cond:
+            continue
+        close_price = bool(price and p) and abs(price - p) <= 0.01 * p
+        overlap = len(tk & set(toks)) / max(1, min(len(tk), len(toks)))
+        if (bool(mk) and mk == k) or (close_price and overlap >= 0.4):
+            if price and p and price <= p * (1 - REPRICE_DROP / 100):
+                continue   # ulteriore ribasso: non e' un duplicato
+            return True
+    return False
+
+
+def mark_sent(item, cat):
+    SENT.append([time.time(), item["price"] or 0, cat, _condition(item),
+                 model_key(item["title"], cat), sorted(_tokens(item["title"]))])
+    del SENT[:-400]
+
+
 def evaluate(item):
     """Ritorna None oppure dict con la decisione di invio."""
     cat = classify(item["title"])
@@ -368,12 +515,16 @@ def evaluate(item):
             below = (1 - item["price"] / base) * 100
     if not conf:
         conf = "media" if orig else "bassa"
-    is_error = keyword_error or discount >= ERROR_DISCOUNT
+    # Sconto molto alto rispetto a un listino DICHIARATO dalla fonte: e' un errore solo se lo storico lo conferma
+    # (i listini possono essere gonfiati); senza listino dichiarato resta il segnale di possibile errore.
+    is_error = keyword_error or (discount >= ERROR_DISCOUNT and (not orig or below >= PRICE_DROP))
     is_anomaly = below >= PRICE_DROP
     is_deal = discount >= MIN_DISCOUNT
-    if not (is_error or is_anomaly or is_deal or SEND_UNKNOWN):
+    is_curated = bool(item.get("curated")) and CURATED_SEND
+    if not (is_error or is_anomaly or is_deal or is_curated or SEND_UNKNOWN):
         return None
-    kind = "error" if is_error else ("anomaly" if is_anomaly else ("deal" if is_deal else "unknown"))
+    kind = ("error" if is_error else "anomaly" if is_anomaly else "deal" if is_deal
+            else "curated" if is_curated else "unknown")
     return {"category": cat, "discount": discount, "orig": orig, "kind": kind,
             "base": base, "base_note": base_note, "below": below,
             "confidence": conf, "lowest": lowest}
@@ -385,6 +536,7 @@ def build_message(item, d):
     head = {"error": "🚨 POSSIBILE ERRORE DI PREZZO",
             "anomaly": f"⚠️ PREZZO ANOMALO (-{d['below']:.0f}% sotto il riferimento)",
             "deal": f"🔥 SCONTO -{d['discount']:.0f}%",
+            "curated": f"📣 OFFERTA SEGNALATA ({item['source']})",
             "unknown": "🛒 NUOVA OFFERTA"}[d["kind"]]
     lines = [f"{head} [{d['category']}]", item["title"]]
     price = item["price_txt"] or "prezzo n/d"
@@ -401,6 +553,8 @@ def build_message(item, d):
     lines.append(f"Affidabilita' della valutazione: {d.get('confidence', 'bassa')} (non e' una conferma dell'errore)")
     lines.append(f"Negozio: {item['merchant'] or 'n/d'} | Fonte: {item['source']}")
     lines.append(item["link"])
+    if item.get("post"):
+        lines.append(f"Segnalazione originale: {item['post']}")
     lines.append("Verifica la spedizione in Italia prima di acquistare.")
     return "\n".join(lines)
 
@@ -446,12 +600,13 @@ def load_state():
     now = time.time()
     for key, entries in data.get("prices", {}).items():   # migra il formato precedente (solo prezzi)
         PRICE_HISTORY[key] = [e if isinstance(e, list) else [now, float(e), "p"] for e in entries]
+    SENT[:] = [e for e in data.get("sent", []) if isinstance(e, list) and len(e) == 6]
     return data.get("seen", [])
 
 
 def save_state(seen):
     prices = dict(list(PRICE_HISTORY.items())[-3000:])
-    STATE_FILE.write_text(json.dumps({"seen": seen[-MAX_SEEN:], "prices": prices}))
+    STATE_FILE.write_text(json.dumps({"seen": seen[-MAX_SEEN:], "prices": prices, "sent": SENT[-400:]}))
 
 # ----------------------------------------------------------------------------
 # MAIN
@@ -498,9 +653,13 @@ def run_once(dry=False):
     else:
         for it in reversed(new_items):  # dalla piu' vecchia alla piu' recente
             d = evaluate(it)
-            if d:
+            if d and is_duplicate(it, d["category"]):
+                print(f"  duplicato saltato: {it['title'][:70]}")
+                d = None
+            elif d:
                 print(f"  INVIO [{d['kind']}] {it['title'][:80]}")
                 notify(build_message(it, d))
+                mark_sent(it, d["category"])
             if not d or d["kind"] not in ("error", "anomaly"):
                 record_price(it)   # i prezzi anomali non entrano nello storico
     seen.extend(it["guid"] for it in new_items)
