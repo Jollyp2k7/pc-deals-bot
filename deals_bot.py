@@ -23,6 +23,8 @@ Configurazione: variabili d'ambiente o file .env
   BASELINE_PCT=75          percentile dei prezzi osservati usato come "prezzo normale"
   HISTORY_DAYS=90          finestra temporale dello storico (giorni)
   REF_FILE=reference_prices.json   prezzi di riferimento manuali (opzionale, vedi sotto)
+  SEND_ALL=1               1 = invia TUTTE le segnalazioni dei canali Telegram (senza filtri di categoria, negozio, paese, duplicati)
+  MAX_PER_RUN=40           massimo di messaggi per esecuzione (il resto va al giro successivo); SEND_DELAY=2.1 = pausa in secondi
   CURATED_SEND=1           1 = invia le segnalazioni dei canali Telegram curati; 0 = solo sconti/prezzi anomali
   COUNTRIES=it,es,fr,de    marketplace ammessi per i canali Telegram (de = Amazon.de)
   EXTRA_CATEGORIES=1       1 = include accessori PC e rete; 0 = solo le categorie principali
@@ -64,15 +66,15 @@ FEEDS = [
     {"name": "Tom's Hardware (IT)", "url": "https://www.tomshw.it/feed/offerte"},
     # Canali Telegram pubblici di offerte Amazon, letti dall'anteprima web pubblica (t.me/s/<canale>).
     # "curated": le segnalazioni sono selezionate dal canale -> vengono inviate anche senza sconto calcolabile.
-    {"name": "Prodigeek Offerte (Telegram)", "type": "tgchannel", "channel": "prodigeekOfferte", "curated": True},
-    {"name": "JustTrack It (Telegram)", "type": "tgchannel", "channel": "JustTrackIt", "curated": True},
-    {"name": "AssemblarePCOnline (Telegram)", "type": "tgchannel", "channel": "assemblarepconline", "curated": True},
-    {"name": "VereOfferteTech (Telegram)", "type": "tgchannel", "channel": "vereoffertetech", "curated": True},
-    {"name": "MoreThanTech (Telegram)", "type": "tgchannel", "channel": "MTTVIDEO", "curated": True},
-    {"name": "Prophecy Tech (Telegram)", "type": "tgchannel", "channel": "nexthardwareofferte", "curated": True},
+    {"name": "Prodigeek Offerte (Telegram)", "type": "tgchannel", "channel": "prodigeekOfferte", "curated": True, "hw": True},
+    {"name": "JustTrack It (Telegram)", "type": "tgchannel", "channel": "JustTrackIt", "curated": True, "hw": True},
+    {"name": "AssemblarePCOnline (Telegram)", "type": "tgchannel", "channel": "assemblarepconline", "curated": True, "hw": True},
+    {"name": "VereOfferteTech (Telegram)", "type": "tgchannel", "channel": "vereoffertetech", "curated": True, "hw": True},
+    {"name": "MoreThanTech (Telegram)", "type": "tgchannel", "channel": "MTTVIDEO", "curated": True, "hw": True},
+    {"name": "Prophecy Tech (Telegram)", "type": "tgchannel", "channel": "nexthardwareofferte", "curated": True, "hw": True},
     {"name": "Prezz.one (Telegram)", "type": "tgchannel", "channel": "Prezzone", "curated": True},
-    {"name": "PCBuilder Hardware Offerte (Telegram)", "type": "tgchannel", "channel": "pcbuilderofferte", "curated": True},
-    {"name": "MiglioriPC (Telegram)", "type": "tgchannel", "channel": "miglioripc", "curated": True},
+    {"name": "PCBuilder Hardware Offerte (Telegram)", "type": "tgchannel", "channel": "pcbuilderofferte", "curated": True, "hw": True},
+    {"name": "MiglioriPC (Telegram)", "type": "tgchannel", "channel": "miglioripc", "curated": True, "hw": True},
     {"name": "OutOfBit Offerte Tech (Telegram)", "type": "tgchannel", "channel": "offertetechoutofbit", "curated": True},
     {"name": "Tempo Di Sconti (Telegram)", "type": "tgchannel", "channel": "tempodisconti", "curated": True},
     {"name": "Offerte (Telegram)", "type": "tgchannel", "channel": "offerte", "curated": True},
@@ -82,7 +84,7 @@ FEEDS = [
     {"name": "Bombe ed Errori di Prezzo (Telegram)", "type": "tgchannel", "channel": "bombeimperdibili", "curated": True},
     {"name": "AmazPrice (Telegram)", "type": "tgchannel", "channel": "amazprice", "curated": True},
     {"name": "Sconty Online (Telegram)", "type": "tgchannel", "channel": "sconty_online", "curated": True},
-    {"name": "PC Hardware & Offerte (Telegram)", "type": "tgchannel", "channel": "pc_hardware_offerte", "curated": True},
+    {"name": "PC Hardware & Offerte (Telegram)", "type": "tgchannel", "channel": "pc_hardware_offerte", "curated": True, "hw": True},
     {"name": "Codici Sconto Tech (Telegram)", "type": "tgchannel", "channel": "codiciscontotech", "curated": True},
     {"name": "CervOfferte (Telegram)", "type": "tgchannel", "channel": "cervofferte", "curated": True},
     {"name": "TrovaPromozioni (Telegram)", "type": "tgchannel", "channel": "trovapromozioni", "curated": True},
@@ -105,7 +107,12 @@ MERCHANT_BLOCK = [m.strip().lower() for m in env("MERCHANT_BLOCK", "").split(","
 STATE_FILE = Path(env("STATE_FILE", "deals_state.json"))
 LOOP = env("LOOP", "0") == "1"
 INTERVAL = max(60, int(env("INTERVAL_SECONDS", "300")))
-MAX_SEEN = 3000
+MAX_SEEN = 8000
+_sa = env("SEND_ALL", "all").lower()
+SEND_ALL = "all" if _sa in ("1", "true", "all") else ("hw" if _sa == "hw" else "0")
+# all = invia TUTTE le segnalazioni di tutti i canali Telegram | hw = tutto dai soli canali dedicati all'hardware | 0 = filtri attivi
+MAX_PER_RUN = int(env("MAX_PER_RUN", "40"))              # massimo di messaggi per esecuzione; il resto va al giro successivo
+SEND_DELAY = float(env("SEND_DELAY", "2.1"))             # pausa tra messaggi (Discord: max 30 al minuto per webhook)
 CURATED_SEND = env("CURATED_SEND", "1") == "1"       # 1 = invia le segnalazioni dei canali curati anche senza sconto calcolabile
 EXCLUDE_USED = env("EXCLUDE_USED", "0") == "1"            # 1 = scarta le offerte Amazon Seconda Mano (canali Telegram)
 DEDUPE_HOURS = float(env("DEDUPE_HOURS", "24"))          # finestra anti-duplicati tra fonti diverse
@@ -249,19 +256,33 @@ def _is_marker(line):
     return bool(clean) and not re.search(r"[A-Za-z0-9]", clean) and clean not in ("\u2122", "\u00ae")
 
 
+def _is_banner(text):
+    """Intestazione in maiuscolo senza numeri, max 3 parole (es. "PREZZONE", "MINIMO STORICO")."""
+    t = text.strip()
+    if re.fullmatch(r"(?:[A-Z]\s){2,}[A-Z]", t):   # lettere spaziate: "A F F A R E"
+        return True
+    return bool(t) and len(t.split()) <= 3 and t == t.upper() and not re.search(r"\d", t)
+
+
 def _tg_split(lines):
-    """Divide il messaggio in (titolo, righe_successive). Il titolo e' il testo prima del primo separatore."""
-    parts, i = [], 0
+    """Divide il messaggio in (titolo, righe_successive). Il titolo e' il primo blocco di testo che non e' un banner."""
+    blocks, cur, end_idx = [], [], 0
     for i, ln in enumerate(lines):
         if _is_marker(ln) or ln.startswith("http"):
-            if parts:
-                break
+            if cur:
+                blocks.append((" ".join(cur), i)); cur = []
             continue
-        parts.append(ln)
-    else:
-        i = len(lines)
-    title = re.sub(r"\s+", " ", " ".join(parts)).replace("\u2122", "").replace("\u00ae", "").strip()
-    return title, lines[i:]
+        cur.append(ln)
+    if cur:
+        blocks.append((" ".join(cur), len(lines)))
+    for k, (txt, end_idx) in enumerate(blocks):
+        nxt = blocks[k + 1][0] if k + 1 < len(blocks) else ""
+        looks_like_title = len(nxt) >= 6 and not re.search(r"\u20ac|http|Prezzo", nxt)
+        if _is_banner(txt) and looks_like_title:
+            continue
+        title = re.sub(r"\s+", " ", txt).replace("\u2122", "").replace("\u00ae", "").strip()
+        return title, lines[end_idx:]
+    return "", []
 
 
 def fetch_tg(feed):
@@ -270,6 +291,7 @@ def fetch_tg(feed):
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
     items = []
+    pass_all = SEND_ALL == "all" or (SEND_ALL == "hw" and bool(feed.get("hw")))
     for m in soup.select("div.tgme_widget_message"):
         text_el = m.select_one(".tgme_widget_message_text")
         post = m.get("data-post")
@@ -278,7 +300,7 @@ def fetch_tg(feed):
         lines = [INVISIBLE_RE.sub("", ln).strip() for ln in text_el.get_text("\n", strip=True).split("\n")]
         lines = [ln for ln in lines if ln]
         full = " ".join(lines)
-        if len(re.findall(r"Prezzo:", full)) >= 2:
+        if len(re.findall(r"Prezzo:", full)) >= 2 and not pass_all:
             continue   # messaggio con piu' prodotti: non assegnabile a un solo prezzo
         title, rest = _tg_split(lines)
         rest_txt = " ".join(rest)
@@ -297,10 +319,10 @@ def fetch_tg(feed):
         country = FLAG_MAP.get(flag.group(0)) if flag else None
         if not country and shop:
             country = next((c for dom, c in DOMAIN_COUNTRY.items() if dom in shop), None)
-        if country and ALLOWED_COUNTRIES and country not in ALLOWED_COUNTRIES:
+        if country and ALLOWED_COUNTRIES and country not in ALLOWED_COUNTRIES and not pass_all:
             continue   # marketplace non richiesto (es. Amazon.de)
         used = bool(re.search(r"\busato\b|seconda mano", full, re.I)) and not re.search(r"nuovo a\s", full, re.I)
-        if used and EXCLUDE_USED:
+        if used and EXCLUDE_USED and not pass_all:
             continue
         is_amazon = bool(shop) or "amazon" in full.lower()
         merchant = ("Amazon" + (" (usato)" if used else "")) if is_amazon else ("AliExpress" if "aliexpress" in " ".join(hrefs) else "")
@@ -308,7 +330,8 @@ def fetch_tg(feed):
             "guid": post, "title": title, "link": link, "post": post_url,
             "feed_category": "", "merchant": merchant, "price_txt": price_txt,
             "price": parse_price(price_txt), "desc": full, "source": feed["name"],
-            "curated": bool(feed.get("curated")),
+            "curated": bool(feed.get("curated")), "pass_all": pass_all,
+            "ts": (m.select_one("time").get("datetime") if m.select_one("time") else ""),
         })
     items.reverse()   # dal piu' recente al piu' vecchio, come i feed RSS
     return items
@@ -511,6 +534,8 @@ def _condition(item):
 
 def is_duplicate(item, cat):
     """Stessa offerta gia' inviata (anche da un'altra fonte) nelle ultime DEDUPE_HOURS ore, salvo ulteriore ribasso."""
+    if item.get("pass_all"):
+        return False   # modalita' "invia tutto": nessuna deduplicazione
     now, price, cond = time.time(), item["price"], _condition(item)
     mk, tk = model_key(item["title"], cat), _tokens(item["title"])
     for ts, p, c, cd, k, toks in SENT:
@@ -533,8 +558,9 @@ def mark_sent(item, cat):
 
 def evaluate(item):
     """Ritorna None oppure dict con la decisione di invio."""
-    cat = classify(item["title"])
-    if not cat or not merchant_allowed(item["merchant"]):
+    pass_all = bool(item.get("pass_all"))
+    cat = classify(item["title"]) or ("Altro" if pass_all else None)
+    if not cat or not (pass_all or merchant_allowed(item["merchant"])):
         return None
     discount, orig = extract_discount(item["title"], item["desc"], item["price"])
     text = f"{item['title']} {item['desc'][:400]}"
@@ -552,7 +578,7 @@ def evaluate(item):
     is_error = keyword_error or (discount >= ERROR_DISCOUNT and (not orig or below >= PRICE_DROP))
     is_anomaly = below >= PRICE_DROP
     is_deal = discount >= MIN_DISCOUNT
-    is_curated = bool(item.get("curated")) and CURATED_SEND
+    is_curated = bool(item.get("curated")) and (CURATED_SEND or bool(item.get("pass_all")))
     if not (is_error or is_anomaly or is_deal or is_curated or SEND_UNKNOWN):
         return None
     kind = ("error" if is_error else "anomaly" if is_anomaly else "deal" if is_deal
@@ -570,7 +596,7 @@ def build_message(item, d):
             "deal": f"🔥 SCONTO -{d['discount']:.0f}%",
             "curated": f"📣 OFFERTA SEGNALATA ({item['source']})",
             "unknown": "🛒 NUOVA OFFERTA"}[d["kind"]]
-    lines = [f"{head} [{d['category']}]", item["title"]]
+    lines = [f"{head}" + ("" if d["category"] == "Altro" else f" [{d['category']}]"), item["title"]]
     price = item["price_txt"] or "prezzo n/d"
     if d["orig"]:
         lines.append(f"Prezzo: {price} (prima {d['orig']:.2f} EUR, circa -{d['discount']:.0f}%)")
@@ -595,9 +621,19 @@ def send_discord(text):
     hook = env("DISCORD_WEBHOOK_URL")
     if not hook:
         return
-    r = requests.post(hook, json={"content": text[:1990]}, timeout=15)
-    if r.status_code >= 300:
-        print(f"  Discord HTTP {r.status_code}")
+    for attempt in range(4):
+        r = requests.post(hook, json={"content": text[:1990]}, timeout=15)
+        if r.status_code == 429:   # limite di Discord: attendi quanto richiesto e riprova
+            try:
+                wait = float(r.json().get("retry_after", 2))
+            except Exception:
+                wait = 2.0
+            print(f"  Discord 429: attendo {wait:.1f}s")
+            time.sleep(min(wait, 20) + 0.5)
+            continue
+        if r.status_code >= 300:
+            print(f"  Discord HTTP {r.status_code}")
+        return
 
 
 def send_telegram(text):
@@ -617,7 +653,7 @@ def notify(text):
             fn(text)
         except Exception as exc:
             print(f"  {fn.__name__} fallita: {exc}")
-    time.sleep(1.2)  # rispetta i rate limit dei canali
+    time.sleep(SEND_DELAY)  # rispetta i rate limit dei canali
 
 # ----------------------------------------------------------------------------
 # STATO
@@ -683,7 +719,10 @@ def run_once(dry=False):
         for it in reversed(new_items):
             record_price(it)
     else:
+        sent_now, processed = 0, []
         for it in reversed(new_items):  # dalla piu' vecchia alla piu' recente
+            if sent_now >= MAX_PER_RUN:
+                break   # il resto resta "non visto" e viene inviato al giro successivo
             d = evaluate(it)
             if d and is_duplicate(it, d["category"]):
                 print(f"  duplicato saltato: {it['title'][:70]}")
@@ -692,8 +731,13 @@ def run_once(dry=False):
                 print(f"  INVIO [{d['kind']}] {it['title'][:80]}")
                 notify(build_message(it, d))
                 mark_sent(it, d["category"])
+                sent_now += 1
             if not d or d["kind"] not in ("error", "anomaly"):
                 record_price(it)   # i prezzi anomali non entrano nello storico
+            processed.append(it["guid"])
+        if sent_now >= MAX_PER_RUN:
+            print(f"Limite di {MAX_PER_RUN} messaggi raggiunto: i rimanenti vanno al prossimo giro.")
+        new_items = [it for it in new_items if it["guid"] in set(processed)]
     seen.extend(it["guid"] for it in new_items)
     save_state(seen)
 
