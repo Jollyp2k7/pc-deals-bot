@@ -155,7 +155,7 @@ CATEGORIES = {
     "Mouse": [r"\bmouse\b", r"\brat[oó]n\b", r"\bsouris\b"],
     "Microfono": [r"micr[oó]fono", r"microphone", r"microfono"],
     "SSD / disco": [r"\bssd\b", r"\bnvme\b", r"\bm\.2\b", r"hard\s?disk", r"disque\s+dur", r"disco\s+duro"],
-    "Raffreddamento": [r"dissipatore", r"raffreddamento\s+(?:a\s+)?liquido", r"\baio\b", r"ventola", r"ventilador",
+    "Raffreddamento": [r"thermalright", r"noctua", r"peerless\s+assassin", r"arctic\s+(?:freezer|liquid)", r"dissipatore", r"raffreddamento\s+(?:a\s+)?liquido", r"\baio\b", r"ventola", r"ventilador",
                        r"ventirad", r"watercooling"],
     "Case": [r"\bcase\s+(?:pc|gaming)", r"pc\s+(?:gaming\s+)?case", r"mid[- ]?tower", r"full[- ]?tower",
              r"bo[iî]tier\s+pc", r"torre\s+pc"],
@@ -171,7 +171,7 @@ if EXTRA_CATEGORIES:
         r"\bkvm\b", r"\bpen\s?drive\b", r"chiavetta\s+usb", r"gruppo\s+di\s+continuit", r"\bups\b"]
     CATEGORIES["Rete"] = [r"\brouter\b", r"\bmesh\b", r"access\s+point", r"\bpowerline\b",
                           r"switch\s+(?:di\s+rete|ethernet|gigabit|poe)", r"scheda\s+di\s+rete", r"ripetitore\s+wi-?fi", r"\bnas\b"]
-_PRIORITY = ("Case", "Alimentatore", "Scheda video", "Scheda madre", "Raffreddamento", "Rete", "Accessori PC", "SSD / disco")
+_PRIORITY = ("Case", "Alimentatore", "Scheda madre", "Raffreddamento", "Rete", "Accessori PC", "SSD / disco")
 _PRIORITY = tuple(k for k in _PRIORITY if k in CATEGORIES)
 CATEGORIES = {**{k: CATEGORIES[k] for k in _PRIORITY}, **{k: v for k, v in CATEGORIES.items() if k not in _PRIORITY}}
 CATEGORY_RE = {c: re.compile("|".join(p), re.I) for c, p in CATEGORIES.items()}
@@ -391,10 +391,19 @@ def fetch_items(feed):
     return items
 
 
+GPU_STRONG_RE = re.compile(r"\b(?:rtx|gtx)\s?\d{3,4}|\brx\s?\d{4}|radeon\s+rx|geforce\s+(?:rtx|gtx)|\barc\s+[ab]\d{3}", re.I)
+_HEAD = ("Case", "Alimentatore", "Scheda madre")
+
+
 def classify(title):
     if EXCLUDE_RE.search(title):
         return None
+    gpu_checked = False
     for cat, rx in CATEGORY_RE.items():
+        if not gpu_checked and cat not in _HEAD:
+            gpu_checked = True
+            if GPU_STRONG_RE.search(title):
+                return "Scheda video"
         if rx.search(title):
             return cat
     return None
