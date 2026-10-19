@@ -146,12 +146,12 @@ CATEGORIES = {
             r"\bram\b.*\b(?:kit|mhz|mt/s)\b", r"\b(?:kit|mhz|mt/s)\b.*\bram\b"],
     "Scheda video": [r"tarjeta\s+gr[aá]fica", r"carte\s+graphique", r"scheda\s+(?:video|grafica)",
                      r"\brtx\s?\d{4}", r"\bgtx\s?\d{3,4}", r"geforce", r"radeon\s+rx",
-                     r"\brx\s?\d{4}\b", r"\bgpu\b"],
+                     r"\brx\s?\d{4}", r"\bgpu\b"],
     "Alimentatore": [r"fuente\s+(?:de\s+alimentaci[oó]n|modular|atx|pc)", r"bloc\s+d.alimentation",
                      r"alimentation\s+(?:modulaire|atx|pc|80)", r"alimentatore", r"\bpsu\b",
                      r"80\s?\+?\s?plus"],
     "Tastiera": [r"teclado", r"clavier", r"tastiera", r"keyboard"],
-    "Cuffie": [r"auriculares", r"\bcasque\b", r"cuffie", r"headset", r"headphones"],
+    "Cuffie": [r"auriculares", r"\bcasque\b", r"cuffi[ae]", r"headset", r"headphones"],
     "Mouse": [r"\bmouse\b", r"\brat[oó]n\b", r"\bsouris\b"],
     "Microfono": [r"micr[oó]fono", r"microphone", r"microfono"],
     "SSD / disco": [r"\bssd\b", r"\bnvme\b", r"\bm\.2\b", r"hard\s?disk", r"disque\s+dur", r"disco\s+duro"],
@@ -164,14 +164,14 @@ CATEGORIES = {
 EXTRA_CATEGORIES = env("EXTRA_CATEGORIES", "1") == "1"   # 1 = include accessori PC e rete (tappetini, hub, cavi, router...)
 if EXTRA_CATEGORIES:
     CATEGORIES["Accessori PC"] = [
-        r"tappetino", r"mouse\s?pad", r"alfombrilla", r"supporto\s+(?:per\s+)?monitor", r"braccio\s+(?:per\s+)?monitor",
-        r"bras\s+articul", r"soporte\s+(?:para\s+)?monitor", r"\bhub\s+usb", r"docking\s+station", r"\bdock\b",
+        r"tappetino\s+(?:per\s+|da\s+)?(?:mouse|gaming|scrivania)", r"mouse\s?pad", r"alfombrilla", r"supporto\s+(?:per\s+)?monitor", r"braccio\s+(?:per\s+)?monitor",
+        r"bras\s+articul", r"soporte\s+(?:para\s+)?monitor", r"\bhub\s+usb", r"docking\s+station",
         r"cavo\s+(?:displayport|hdmi|thunderbolt)", r"cable\s+(?:displayport|hdmi)", r"pasta\s+termica",
         r"\bgamepad\b", r"controller\s+(?:wireless\s+)?(?:per\s+|di\s+gioco\s+)?(?:pc|xbox|playstation)", r"controller.{0,25}(?:xbox|playstation)", r"capture\s+card", r"stream\s?deck",
         r"\bkvm\b", r"\bpen\s?drive\b", r"chiavetta\s+usb", r"gruppo\s+di\s+continuit", r"\bups\b"]
-    CATEGORIES["Rete"] = [r"\brouter\b", r"\bmesh\b", r"wi-?fi\s?[67]", r"access\s+point", r"\bpowerline\b",
+    CATEGORIES["Rete"] = [r"\brouter\b", r"\bmesh\b", r"access\s+point", r"\bpowerline\b",
                           r"switch\s+(?:di\s+rete|ethernet|gigabit|poe)", r"scheda\s+di\s+rete", r"ripetitore\s+wi-?fi", r"\bnas\b"]
-_PRIORITY = ("Accessori PC", "Rete", "Case", "Alimentatore", "Raffreddamento", "SSD / disco")
+_PRIORITY = ("Case", "Alimentatore", "Scheda video", "Scheda madre", "Raffreddamento", "Rete", "Accessori PC", "SSD / disco")
 _PRIORITY = tuple(k for k in _PRIORITY if k in CATEGORIES)
 CATEGORIES = {**{k: CATEGORIES[k] for k in _PRIORITY}, **{k: v for k, v in CATEGORIES.items() if k not in _PRIORITY}}
 CATEGORY_RE = {c: re.compile("|".join(p), re.I) for c, p in CATEGORIES.items()}
@@ -180,7 +180,7 @@ CATEGORY_RE = {c: re.compile("|".join(p), re.I) for c, p in CATEGORIES.items()}
 EXCLUDE_RE = re.compile(
     r"beb[eé]|\bbaby\b|b[eé]b[eé]|tensi[oó]n\s+arterial|presi[oó]n\s+arterial|gluc[oó]|"
     r"tension\s+art[eé]rielle|pressione|\bgatos?\b|\bperros?\b|"
-    r"\bmini\s?pc\b|gaming\s+pc\b|pc\s+(?:desktop|fisso|gaming\s+completo)|desktop\s+pc|barebone|\btablet\b|smartphone|cellulare|\biphone\b|\bkindle\b|\bfire\s?tv\b|smart\s?watch|controller\s+(?:di\s+gioco\s+)?(?:mobile|smartphone|per\s+(?:smartphone|telefono))|geforce\s+now|pc\s+portable|port[aá]til|portatile|\blaptop\b|\bnotebook\b|\bzenbook\b|\bmacbook\b|"
+    r"\bmini\s?pc\b|gaming\s+pc\b|pc\s+(?:desktop|fisso|gaming\s+completo)|desktop\s+pc|barebone|bosgame|chuwi|minisforum|beelink|geekom|\bwatch\b|ciotola|animali|\bcane\b|\bgatto\b|\btablet\b|smartphone|cellulare|\biphone\b|\bkindle\b|\bfire\s?tv\b|smart\s?watch|controller\s+(?:di\s+gioco\s+)?(?:mobile|smartphone|per\s+(?:smartphone|telefono))|geforce\s+now|pc\s+portable|port[aá]til|portatile|\blaptop\b|\bnotebook\b|\bzenbook\b|\bmacbook\b|"
     r"\bfunda\b|housse|cover\s+per|custodia", re.I)
 
 ERROR_KEYWORDS_RE = re.compile(
@@ -556,6 +556,26 @@ def mark_sent(item, cat):
     del SENT[:-400]
 
 
+# Prezzi minimi plausibili per prodotti NUOVI di una categoria. Sotto soglia = possibile errore di prezzo.
+# Controllo solo con modelli riconoscibili nel titolo, per evitare accessori (es. "supporto GPU").
+PRICE_FLOORS = [
+    ("Scheda video", 120, re.compile(r"\b(?:rtx|gtx)\s?\d{3,4}|\brx\s?\d{4}|radeon\s+rx|geforce", re.I)),
+    ("Scheda madre", 40, re.compile(r"scheda\s+madre|placa\s+base|carte\s+m[eè]re|motherboard", re.I)),
+    ("CPU", 45, re.compile(r"\bryzen\s+\d|core\s+(?:ultra\s+)?i[3579]|core\s+ultra\s+\d", re.I)),
+    ("Monitor", 45, re.compile(r"\bmonitor\b|\becran\b|schermo", re.I)),
+    ("Alimentatore", 15, re.compile(r"alimentatore|fuente\s+de\s+alimentaci|bloc\s+d.alimentation", re.I)),
+]
+
+
+def below_floor(item, cat):
+    if not item["price"] or "(usato)" in item["merchant"]:
+        return None
+    for c, floor, rx in PRICE_FLOORS:
+        if c == cat and item["price"] < floor and rx.search(item["title"]):
+            return floor
+    return None
+
+
 def evaluate(item):
     """Ritorna None oppure dict con la decisione di invio."""
     pass_all = bool(item.get("pass_all"))
@@ -575,7 +595,9 @@ def evaluate(item):
         conf = "media" if orig else "bassa"
     # Sconto molto alto rispetto a un listino DICHIARATO dalla fonte: e' un errore solo se lo storico lo conferma
     # (i listini possono essere gonfiati); senza listino dichiarato resta il segnale di possibile errore.
-    is_error = keyword_error or (discount >= ERROR_DISCOUNT and (not orig or below >= PRICE_DROP))
+    floor = below_floor(item, cat)
+    # Per i prodotti non PC ("Altro") un forte sconto dichiarato non basta a parlare di errore: resta "sconto".
+    is_error = keyword_error or bool(floor) or (cat != "Altro" and discount >= ERROR_DISCOUNT and (not orig or below >= PRICE_DROP))
     is_anomaly = below >= PRICE_DROP
     is_deal = discount >= MIN_DISCOUNT
     is_curated = bool(item.get("curated")) and (CURATED_SEND or bool(item.get("pass_all")))
@@ -585,7 +607,7 @@ def evaluate(item):
             else "curated" if is_curated else "unknown")
     return {"category": cat, "discount": discount, "orig": orig, "kind": kind,
             "base": base, "base_note": base_note, "below": below,
-            "confidence": conf, "lowest": lowest}
+            "confidence": conf, "lowest": lowest, "floor": floor, "keyword": keyword_error}
 
 # ----------------------------------------------------------------------------
 # MESSAGGI E NOTIFICHE
@@ -606,6 +628,10 @@ def build_message(item, d):
         lines.append(f"Prezzo: {price}")
     if d["base"]:
         lines.append(f"Riferimento: {d['base']:.2f} EUR ({d['base_note']})")
+    if d.get("floor"):
+        lines.append(f"Prezzo sotto la soglia minima plausibile per la categoria ({d['floor']} EUR): possibile errore di prezzo.")
+    if d.get("keyword") and not d.get("floor"):
+        lines.append("Il canale la segnala come errore di prezzo (non verificato).")
     if d.get("lowest"):
         lines.append("La fonte indica un minimo storico.")
     lines.append(f"Affidabilita' della valutazione: {d.get('confidence', 'bassa')} (non e' una conferma dell'errore)")
