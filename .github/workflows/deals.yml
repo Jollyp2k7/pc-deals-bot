@@ -2,7 +2,7 @@ name: PC deals bot
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # ogni 10 minuti; su repo PRIVATO usa "*/30 * * * *" per restare nelle minutazioni gratuite
+    - cron: "*/5 * * * *"   # ogni 5 minuti (minimo consentito da GitHub); su repo PRIVATO usa "*/30 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -50,3 +50,10 @@ jobs:
           SEND_UNKNOWN: ${{ vars.SEND_UNKNOWN }}
           MERCHANT_ALLOW: ${{ vars.MERCHANT_ALLOW }}
           MERCHANT_BLOCK: ${{ vars.MERCHANT_BLOCK }}
+          CURATED_SEND: ${{ vars.CURATED_SEND }}
+          COUNTRIES: ${{ vars.COUNTRIES }}
+          EXCLUDE_USED: ${{ vars.EXCLUDE_USED }}
+          DEDUPE_HOURS: ${{ vars.DEDUPE_HOURS }}
+          REPRICE_DROP: ${{ vars.REPRICE_DROP }}
+          BASELINE_PCT: ${{ vars.BASELINE_PCT }}
+          HISTORY_DAYS: ${{ vars.HISTORY_DAYS }}
