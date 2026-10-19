@@ -57,3 +57,4 @@ jobs:
           REPRICE_DROP: ${{ vars.REPRICE_DROP }}
           BASELINE_PCT: ${{ vars.BASELINE_PCT }}
           HISTORY_DAYS: ${{ vars.HISTORY_DAYS }}
+          EXTRA_CATEGORIES: ${{ vars.EXTRA_CATEGORIES }}
