@@ -19,7 +19,9 @@ Configurazione: variabili d'ambiente o file .env
   MIN_DISCOUNT=25          soglia sconto %
   ERROR_DISCOUNT=60        sconto % oltre il quale scatta "possibile errore di prezzo"
   PRICE_DROP=35            % sotto il prezzo di riferimento oltre cui scatta "prezzo anomalo"
-  MIN_SAMPLES=4            offerte minime osservate per usare la mediana storica
+  MIN_SAMPLES=4            prezzi osservati minimi per costruire il riferimento storico
+  BASELINE_PCT=75          percentile dei prezzi osservati usato come "prezzo normale"
+  HISTORY_DAYS=90          finestra temporale dello storico (giorni)
   REF_FILE=reference_prices.json   prezzi di riferimento manuali (opzionale, vedi sotto)
   SEND_UNKNOWN=0           1 = invia anche componenti PC di cui non si ricava lo sconto
   MERCHANT_ALLOW=amazon    negozi ammessi (separati da virgola); "*" = tutti i negozi
@@ -72,8 +74,10 @@ LOOP = env("LOOP", "0") == "1"
 INTERVAL = max(60, int(env("INTERVAL_SECONDS", "300")))
 MAX_SEEN = 3000
 PRICE_DROP = float(env("PRICE_DROP", "35"))      # % sotto il prezzo di riferimento -> "prezzo anomalo"
-MIN_SAMPLES = int(env("MIN_SAMPLES", "4"))       # campioni minimi per usare la mediana storica
-HISTORY_LEN = 25                                 # ultimi prezzi conservati per prodotto
+MIN_SAMPLES = int(env("MIN_SAMPLES", "4"))       # prezzi osservati minimi per costruire il riferimento
+HISTORY_LEN = 60                                 # voci di storico conservate per prodotto
+HISTORY_DAYS = int(env("HISTORY_DAYS", "90"))    # finestra temporale dello storico
+BASELINE_PCT = float(env("BASELINE_PCT", "75"))  # percentile dei prezzi osservati usato come "prezzo normale"
 REF_FILE = Path(env("REF_FILE", "reference_prices.json"))
 
 HEADERS = {
@@ -288,19 +292,48 @@ def load_refs():
 
 
 REFS = load_refs()
-PRICE_HISTORY = {}   # chiave prodotto -> ultimi prezzi osservati (caricato da load_state)
+PRICE_HISTORY = {}   # chiave prodotto -> lista di [timestamp, prezzo, tipo]; tipo "p" = prezzo osservato, "l" = listino dichiarato
+MIN_HIST_RE = re.compile(r"minimo\s+storico|prezzo\s+pi[uù]\s+basso|mai\s+(?:costato|visto)", re.I)
+
+
+def _percentile(values, pct):
+    v = sorted(values)
+    return v[int(round(pct / 100 * (len(v) - 1)))]
+
+
+def _recent(key):
+    cutoff = time.time() - HISTORY_DAYS * 86400
+    return [e for e in PRICE_HISTORY.get(key, []) if e[0] >= cutoff]
 
 
 def baseline_for(title, cat):
-    """Ritorna (prezzo_di_riferimento, nota) oppure (None, None)."""
+    """Ritorna (prezzo_di_riferimento, nota, affidabilita) oppure (None, None, None).
+
+    Ordine: 1) prezzo manuale da reference_prices.json; 2) storico costruito dal bot.
+    Nello storico i prezzi osservati sono gia' scontati, quindi come "prezzo normale" si usa
+    un percentile alto (BASELINE_PCT); se esiste anche il listino dichiarato dalle fonti si
+    sceglie il valore piu' basso dei due (approccio prudente contro i listini gonfiati).
+    """
     for rx, ref, name in REFS:
         if rx.search(title):
-            return ref, f"riferimento manuale {name}"
+            return ref, f"riferimento manuale {name}", "alta"
     key = model_key(title, cat)
-    hist = PRICE_HISTORY.get(key, []) if key else []
-    if len(hist) >= MIN_SAMPLES:
-        return statistics.median(hist), f"mediana di {len(hist)} offerte osservate"
-    return None, None
+    if not key:
+        return None, None, None
+    hist = _recent(key)
+    observed = [p for _, p, k in hist if k == "p"]
+    listed = [p for _, p, k in hist if k == "l"]
+    candidates, notes = [], []
+    if len(observed) >= MIN_SAMPLES:
+        candidates.append(_percentile(observed, BASELINE_PCT))
+        notes.append(f"{BASELINE_PCT:.0f}\u00b0 percentile di {len(observed)} prezzi osservati")
+    if len(listed) >= 2:
+        candidates.append(statistics.median(listed))
+        notes.append(f"listino mediano di {len(listed)} segnalazioni")
+    if not candidates:
+        return None, None, None
+    conf = "media" if (len(candidates) == 2 or len(observed) >= 10) else "bassa"
+    return min(candidates), " + ".join(notes) + " (storico del bot)", conf
 
 
 def record_price(item):
@@ -308,10 +341,15 @@ def record_price(item):
     if not cat or not item["price"]:
         return
     key = model_key(item["title"], cat)
-    if key:
-        hist = PRICE_HISTORY.setdefault(key, [])
-        hist.append(item["price"])
-        del hist[:-HISTORY_LEN]
+    if not key:
+        return
+    now = time.time()
+    hist = PRICE_HISTORY.setdefault(key, [])
+    hist.append([now, item["price"], "p"])
+    _, orig = extract_discount(item["title"], item["desc"], item["price"])
+    if orig:
+        hist.append([now, orig, "l"])
+    del hist[:-HISTORY_LEN]
 
 
 def evaluate(item):
@@ -320,12 +358,16 @@ def evaluate(item):
     if not cat or not merchant_allowed(item["merchant"]):
         return None
     discount, orig = extract_discount(item["title"], item["desc"], item["price"])
-    keyword_error = bool(ERROR_KEYWORDS_RE.search(f"{item['title']} {item['desc'][:400]}"))
-    base, base_note, below = None, None, 0.0
+    text = f"{item['title']} {item['desc'][:400]}"
+    keyword_error = bool(ERROR_KEYWORDS_RE.search(text))
+    lowest = bool(MIN_HIST_RE.search(text))
+    base, base_note, conf, below = None, None, None, 0.0
     if item["price"]:
-        base, base_note = baseline_for(item["title"], cat)
+        base, base_note, conf = baseline_for(item["title"], cat)
         if base and item["price"] < base:
             below = (1 - item["price"] / base) * 100
+    if not conf:
+        conf = "media" if orig else "bassa"
     is_error = keyword_error or discount >= ERROR_DISCOUNT
     is_anomaly = below >= PRICE_DROP
     is_deal = discount >= MIN_DISCOUNT
@@ -333,7 +375,8 @@ def evaluate(item):
         return None
     kind = "error" if is_error else ("anomaly" if is_anomaly else ("deal" if is_deal else "unknown"))
     return {"category": cat, "discount": discount, "orig": orig, "kind": kind,
-            "base": base, "base_note": base_note, "below": below}
+            "base": base, "base_note": base_note, "below": below,
+            "confidence": conf, "lowest": lowest}
 
 # ----------------------------------------------------------------------------
 # MESSAGGI E NOTIFICHE
@@ -353,6 +396,9 @@ def build_message(item, d):
         lines.append(f"Prezzo: {price}")
     if d["base"]:
         lines.append(f"Riferimento: {d['base']:.2f} EUR ({d['base_note']})")
+    if d.get("lowest"):
+        lines.append("La fonte indica un minimo storico.")
+    lines.append(f"Affidabilita' della valutazione: {d.get('confidence', 'bassa')} (non e' una conferma dell'errore)")
     lines.append(f"Negozio: {item['merchant'] or 'n/d'} | Fonte: {item['source']}")
     lines.append(item["link"])
     lines.append("Verifica la spedizione in Italia prima di acquistare.")
@@ -397,7 +443,9 @@ def load_state():
         return None
     if isinstance(data, list):   # formato precedente
         data = {"seen": data, "prices": {}}
-    PRICE_HISTORY.update(data.get("prices", {}))
+    now = time.time()
+    for key, entries in data.get("prices", {}).items():   # migra il formato precedente (solo prezzi)
+        PRICE_HISTORY[key] = [e if isinstance(e, list) else [now, float(e), "p"] for e in entries]
     return data.get("seen", [])
 
 
