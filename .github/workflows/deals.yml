@@ -2,7 +2,7 @@ name: PC deals bot
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # ogni 10 minuti; su repo PRIVATO usa "*/30 * * * *" per restare nelle minutazioni gratuite
+    - cron: "*/5 * * * *"   # ogni 10 minuti; su repo PRIVATO usa "*/30 * * * *" per restare nelle minutazioni gratuite
   workflow_dispatch:
     inputs:
       dry_run:
