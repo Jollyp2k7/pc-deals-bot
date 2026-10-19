@@ -70,6 +70,17 @@ FEEDS = [
     {"name": "MoreThanTech (Telegram)", "type": "tgchannel", "channel": "MTTVIDEO", "curated": True},
     {"name": "Prophecy Tech (Telegram)", "type": "tgchannel", "channel": "nexthardwareofferte", "curated": True},
     {"name": "Prezz.one (Telegram)", "type": "tgchannel", "channel": "Prezzone", "curated": True},
+    {"name": "PCBuilder Hardware Offerte (Telegram)", "type": "tgchannel", "channel": "pcbuilderofferte", "curated": True},
+    {"name": "MiglioriPC (Telegram)", "type": "tgchannel", "channel": "miglioripc", "curated": True},
+    {"name": "OutOfBit Offerte Tech (Telegram)", "type": "tgchannel", "channel": "offertetechoutofbit", "curated": True},
+    {"name": "Tempo Di Sconti (Telegram)", "type": "tgchannel", "channel": "tempodisconti", "curated": True},
+    {"name": "Offerte (Telegram)", "type": "tgchannel", "channel": "offerte", "curated": True},
+    {"name": "Errori di Prezzo (Telegram)", "type": "tgchannel", "channel": "erroridiprezzo", "curated": True},
+    {"name": "Offertazze Errori a Raffica (Telegram)", "type": "tgchannel", "channel": "offertazze", "curated": True},
+    {"name": "Probabili Errori (Telegram)", "type": "tgchannel", "channel": "probabilierrori", "curated": True},
+    {"name": "Bombe ed Errori di Prezzo (Telegram)", "type": "tgchannel", "channel": "bombeimperdibili", "curated": True},
+    {"name": "AmazPrice (Telegram)", "type": "tgchannel", "channel": "amazprice", "curated": True},
+    {"name": "Sconty Online (Telegram)", "type": "tgchannel", "channel": "sconty_online", "curated": True},
 ]
 
 def env(key, default=None):
@@ -115,7 +126,8 @@ CATEGORIES = {
                 r"pantalla\s+(?:gaming|pc|curva)", r"schermo\s+(?:gaming|pc|curvo)"],
     "CPU": [r"procesador", r"processeur", r"processore", r"\bryzen\b",
             r"\bcore\s+(?:ultra\s+)?i[3579]\b", r"\bcore\s+ultra\b", r"threadripper", r"\bcpu\b"],
-    "RAM": [r"memoria\s+ram", r"m[eé]moire\s+(?:vive|ram)", r"\bddr[45]\b", r"\bram\b"],
+    "RAM": [r"memoria\s+ram", r"m[eé]moire\s+(?:vive|ram)", r"\bddr[45]\b", r"\bs?o?-?dimm\b",
+            r"\bram\b.*\b(?:kit|mhz|mt/s)\b", r"\b(?:kit|mhz|mt/s)\b.*\bram\b"],
     "Scheda video": [r"tarjeta\s+gr[aá]fica", r"carte\s+graphique", r"scheda\s+(?:video|grafica)",
                      r"\brtx\s?\d{4}", r"\bgtx\s?\d{3,4}", r"geforce", r"radeon\s+rx",
                      r"\brx\s?\d{4}\b", r"\bgpu\b"],
@@ -133,7 +145,7 @@ CATEGORIES = {
              r"bo[iî]tier\s+pc", r"torre\s+pc"],
     "Webcam": [r"\bwebcam\b"],
 }
-_PRIORITY = ("Raffreddamento", "Case", "SSD / disco")
+_PRIORITY = ("Case", "Alimentatore", "Raffreddamento", "SSD / disco")
 CATEGORIES = {**{k: CATEGORIES[k] for k in _PRIORITY}, **{k: v for k, v in CATEGORIES.items() if k not in _PRIORITY}}
 CATEGORY_RE = {c: re.compile("|".join(p), re.I) for c, p in CATEGORIES.items()}
 
@@ -141,7 +153,7 @@ CATEGORY_RE = {c: re.compile("|".join(p), re.I) for c, p in CATEGORIES.items()}
 EXCLUDE_RE = re.compile(
     r"beb[eé]|\bbaby\b|b[eé]b[eé]|tensi[oó]n\s+arterial|presi[oó]n\s+arterial|gluc[oó]|"
     r"tension\s+art[eé]rielle|pressione|\bgatos?\b|\bperros?\b|"
-    r"\bmini\s?pc\b|gaming\s+pc\b|pc\s+(?:desktop|fisso|gaming\s+completo)|desktop\s+pc|barebone|pc\s+portable|port[aá]til|portatile|\blaptop\b|\bnotebook\b|\bzenbook\b|\bmacbook\b|"
+    r"\bmini\s?pc\b|gaming\s+pc\b|pc\s+(?:desktop|fisso|gaming\s+completo)|desktop\s+pc|barebone|\btablet\b|smartphone|cellulare|\biphone\b|\bkindle\b|\bfire\s?tv\b|smart\s?watch|controller\s+(?:di\s+gioco\s+)?(?:mobile|smartphone|per\s+(?:smartphone|telefono))|geforce\s+now|pc\s+portable|port[aá]til|portatile|\blaptop\b|\bnotebook\b|\bzenbook\b|\bmacbook\b|"
     r"bras\s+articul|\bbrazo\b|\bsoporte\b|\bsupporto\b|braccio\s+(?:per|monitor)|alfombrilla|\bfunda\b|housse", re.I)
 
 ERROR_KEYWORDS_RE = re.compile(
