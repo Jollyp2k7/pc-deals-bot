@@ -17,10 +17,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: deals-bot
+  cancel-in-progress: false
+
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
 
@@ -58,3 +62,6 @@ jobs:
           BASELINE_PCT: ${{ vars.BASELINE_PCT }}
           HISTORY_DAYS: ${{ vars.HISTORY_DAYS }}
           EXTRA_CATEGORIES: ${{ vars.EXTRA_CATEGORIES }}
+          SEND_ALL: ${{ vars.SEND_ALL }}
+          MAX_PER_RUN: ${{ vars.MAX_PER_RUN }}
+          SEND_DELAY: ${{ vars.SEND_DELAY }}
