@@ -24,7 +24,8 @@ Configurazione: variabili d'ambiente o file .env
   HISTORY_DAYS=90          finestra temporale dello storico (giorni)
   REF_FILE=reference_prices.json   prezzi di riferimento manuali (opzionale, vedi sotto)
   CURATED_SEND=1           1 = invia le segnalazioni dei canali Telegram curati; 0 = solo sconti/prezzi anomali
-  COUNTRIES=it,es,fr       marketplace ammessi per i canali Telegram
+  COUNTRIES=it,es,fr,de    marketplace ammessi per i canali Telegram (de = Amazon.de)
+  EXTRA_CATEGORIES=1       1 = include accessori PC e rete; 0 = solo le categorie principali
   EXCLUDE_USED=0           1 = scarta le offerte Amazon Seconda Mano
   DEDUPE_HOURS=24          finestra anti-duplicati tra fonti; REPRICE_DROP=3 = % di ribasso per rinviare l'offerta
   SEND_UNKNOWN=0           1 = invia anche componenti PC di cui non si ricava lo sconto
@@ -81,6 +82,14 @@ FEEDS = [
     {"name": "Bombe ed Errori di Prezzo (Telegram)", "type": "tgchannel", "channel": "bombeimperdibili", "curated": True},
     {"name": "AmazPrice (Telegram)", "type": "tgchannel", "channel": "amazprice", "curated": True},
     {"name": "Sconty Online (Telegram)", "type": "tgchannel", "channel": "sconty_online", "curated": True},
+    {"name": "PC Hardware & Offerte (Telegram)", "type": "tgchannel", "channel": "pc_hardware_offerte", "curated": True},
+    {"name": "Codici Sconto Tech (Telegram)", "type": "tgchannel", "channel": "codiciscontotech", "curated": True},
+    {"name": "CervOfferte (Telegram)", "type": "tgchannel", "channel": "cervofferte", "curated": True},
+    {"name": "TrovaPromozioni (Telegram)", "type": "tgchannel", "channel": "trovapromozioni", "curated": True},
+    {"name": "Mister Affare (Telegram)", "type": "tgchannel", "channel": "mister_affare", "curated": True},
+    {"name": "Digital Offerte (Telegram)", "type": "tgchannel", "channel": "digitalofferte", "curated": True},
+    {"name": "Offerte Coupon Sconti (Telegram)", "type": "tgchannel", "channel": "couponscontiofferte", "curated": True},
+    {"name": "Offerte Curious (Telegram)", "type": "tgchannel", "channel": "offertecurious", "curated": True},
 ]
 
 def env(key, default=None):
@@ -101,7 +110,7 @@ CURATED_SEND = env("CURATED_SEND", "1") == "1"       # 1 = invia le segnalazioni
 EXCLUDE_USED = env("EXCLUDE_USED", "0") == "1"            # 1 = scarta le offerte Amazon Seconda Mano (canali Telegram)
 DEDUPE_HOURS = float(env("DEDUPE_HOURS", "24"))          # finestra anti-duplicati tra fonti diverse
 REPRICE_DROP = float(env("REPRICE_DROP", "3"))           # % di ulteriore ribasso per rinviare la stessa offerta
-ALLOWED_COUNTRIES = [c.strip().lower() for c in env("COUNTRIES", "it,es,fr").split(",") if c.strip()]  # solo canali Telegram
+ALLOWED_COUNTRIES = [c.strip().lower() for c in env("COUNTRIES", "it,es,fr,de").split(",") if c.strip()]  # solo canali Telegram
 PRICE_DROP = float(env("PRICE_DROP", "35"))      # % sotto il prezzo di riferimento -> "prezzo anomalo"
 MIN_SAMPLES = int(env("MIN_SAMPLES", "4"))       # prezzi osservati minimi per costruire il riferimento
 HISTORY_LEN = 60                                 # voci di storico conservate per prodotto
@@ -145,7 +154,18 @@ CATEGORIES = {
              r"bo[iî]tier\s+pc", r"torre\s+pc"],
     "Webcam": [r"\bwebcam\b"],
 }
-_PRIORITY = ("Case", "Alimentatore", "Raffreddamento", "SSD / disco")
+EXTRA_CATEGORIES = env("EXTRA_CATEGORIES", "1") == "1"   # 1 = include accessori PC e rete (tappetini, hub, cavi, router...)
+if EXTRA_CATEGORIES:
+    CATEGORIES["Accessori PC"] = [
+        r"tappetino", r"mouse\s?pad", r"alfombrilla", r"supporto\s+(?:per\s+)?monitor", r"braccio\s+(?:per\s+)?monitor",
+        r"bras\s+articul", r"soporte\s+(?:para\s+)?monitor", r"\bhub\s+usb", r"docking\s+station", r"\bdock\b",
+        r"cavo\s+(?:displayport|hdmi|thunderbolt)", r"cable\s+(?:displayport|hdmi)", r"pasta\s+termica",
+        r"\bgamepad\b", r"controller\s+(?:wireless\s+)?(?:per\s+|di\s+gioco\s+)?(?:pc|xbox|playstation)", r"controller.{0,25}(?:xbox|playstation)", r"capture\s+card", r"stream\s?deck",
+        r"\bkvm\b", r"\bpen\s?drive\b", r"chiavetta\s+usb", r"gruppo\s+di\s+continuit", r"\bups\b"]
+    CATEGORIES["Rete"] = [r"\brouter\b", r"\bmesh\b", r"wi-?fi\s?[67]", r"access\s+point", r"\bpowerline\b",
+                          r"switch\s+(?:di\s+rete|ethernet|gigabit|poe)", r"scheda\s+di\s+rete", r"ripetitore\s+wi-?fi", r"\bnas\b"]
+_PRIORITY = ("Accessori PC", "Rete", "Case", "Alimentatore", "Raffreddamento", "SSD / disco")
+_PRIORITY = tuple(k for k in _PRIORITY if k in CATEGORIES)
 CATEGORIES = {**{k: CATEGORIES[k] for k in _PRIORITY}, **{k: v for k, v in CATEGORIES.items() if k not in _PRIORITY}}
 CATEGORY_RE = {c: re.compile("|".join(p), re.I) for c, p in CATEGORIES.items()}
 
@@ -154,7 +174,7 @@ EXCLUDE_RE = re.compile(
     r"beb[eé]|\bbaby\b|b[eé]b[eé]|tensi[oó]n\s+arterial|presi[oó]n\s+arterial|gluc[oó]|"
     r"tension\s+art[eé]rielle|pressione|\bgatos?\b|\bperros?\b|"
     r"\bmini\s?pc\b|gaming\s+pc\b|pc\s+(?:desktop|fisso|gaming\s+completo)|desktop\s+pc|barebone|\btablet\b|smartphone|cellulare|\biphone\b|\bkindle\b|\bfire\s?tv\b|smart\s?watch|controller\s+(?:di\s+gioco\s+)?(?:mobile|smartphone|per\s+(?:smartphone|telefono))|geforce\s+now|pc\s+portable|port[aá]til|portatile|\blaptop\b|\bnotebook\b|\bzenbook\b|\bmacbook\b|"
-    r"bras\s+articul|\bbrazo\b|\bsoporte\b|\bsupporto\b|braccio\s+(?:per|monitor)|alfombrilla|\bfunda\b|housse", re.I)
+    r"\bfunda\b|housse|cover\s+per|custodia", re.I)
 
 ERROR_KEYWORDS_RE = re.compile(
     r"error\s+(?:de\s+)?precio|erreur\s+de\s+prix|bug\s+de\s+prix|errore\s+(?:di\s+)?prezzo|"
