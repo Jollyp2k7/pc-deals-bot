@@ -1,0 +1,5 @@
+[
+  {"pattern": "rtx\\s?5070\\s?ti", "ref": 800, "name": "ESEMPIO RTX 5070 Ti - aggiorna il prezzo"},
+  {"pattern": "7800x3d", "ref": 400, "name": "ESEMPIO Ryzen 7 7800X3D - aggiorna il prezzo"},
+  {"pattern": "ddr5.*32\\s?gb|32\\s?gb.*ddr5", "ref": 120, "name": "ESEMPIO RAM DDR5 32GB - aggiorna il prezzo"}
+]

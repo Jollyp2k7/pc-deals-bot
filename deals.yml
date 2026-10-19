@@ -1,0 +1,48 @@
+name: PC deals bot
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # ogni 10 minuti; su repo PRIVATO usa "*/30 * * * *" per restare nelle minutazioni gratuite
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Solo anteprima nel log (nessun invio, nessun salvataggio)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Persistenza delle offerte gia' inviate tra un run e l'altro
+      - uses: actions/cache@v4
+        with:
+          path: deals_state.json
+          key: deals-state-${{ github.run_id }}
+          restore-keys: deals-state-
+
+      - run: python deals_bot.py ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MIN_DISCOUNT: ${{ vars.MIN_DISCOUNT }}
+          ERROR_DISCOUNT: ${{ vars.ERROR_DISCOUNT }}
+          PRICE_DROP: ${{ vars.PRICE_DROP }}
+          MIN_SAMPLES: ${{ vars.MIN_SAMPLES }}
+          SEND_UNKNOWN: ${{ vars.SEND_UNKNOWN }}
+          MERCHANT_ALLOW: ${{ vars.MERCHANT_ALLOW }}
+          MERCHANT_BLOCK: ${{ vars.MERCHANT_BLOCK }}
