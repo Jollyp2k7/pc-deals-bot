@@ -9,6 +9,10 @@ on:
         description: "Solo anteprima nel log (nessun invio, nessun salvataggio)"
         type: boolean
         default: false
+      test:
+        description: "Invia un messaggio di prova su Discord/Telegram"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -34,7 +38,7 @@ jobs:
           key: deals-state-${{ github.run_id }}
           restore-keys: deals-state-
 
-      - run: python deals_bot.py ${{ inputs.dry_run && '--dry-run' || '' }}
+      - run: python deals_bot.py ${{ inputs.test && '--test' || (inputs.dry_run && '--dry-run' || '') }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
