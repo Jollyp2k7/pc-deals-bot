@@ -36,7 +36,7 @@ jobs:
       - run: pip install -r requirements.txt
 
       # Persistenza delle offerte gia' inviate tra un run e l'altro
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: deals_state.json
           key: deals-state-${{ github.run_id }}
@@ -66,4 +66,12 @@ jobs:
           MAX_PER_RUN: ${{ vars.MAX_PER_RUN }}
           SEND_DELAY: ${{ vars.SEND_DELAY }}
           REPEAT_HOURS: ${{ vars.REPEAT_HOURS }}
+          MAX_AGE_HOURS: ${{ vars.MAX_AGE_HOURS }}
           CATEGORIES_ONLY: ${{ vars.CATEGORIES_ONLY }}
+
+      # Salva lo stato anche se il passaggio precedente fallisce o va in timeout
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: deals_state.json
+          key: deals-state-${{ github.run_id }}
