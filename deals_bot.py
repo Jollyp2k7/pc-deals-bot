@@ -30,7 +30,7 @@ Configurazione: variabili d'ambiente o file .env
   COUNTRIES=it,es,fr,de    marketplace ammessi per i canali Telegram (de = Amazon.de)
   EXTRA_CATEGORIES=1       1 = include accessori PC e rete; 0 = solo le categorie principali
   EXCLUDE_USED=0           1 = scarta le offerte Amazon Seconda Mano
-  REPEAT_HOURS=0           >0 = anche in modalita' SEND_ALL non reinvia il post identico (stesso canale, titolo e prezzo) entro N ore
+  REPEAT_HOURS=6           0 = disattivato; >0 = anche in modalita' SEND_ALL non reinvia il post identico (stesso canale, titolo e prezzo) entro N ore
   DEDUPE_HOURS=24          finestra anti-duplicati tra fonti; REPRICE_DROP=3 = % di ribasso per rinviare l'offerta
   SEND_UNKNOWN=0           1 = invia anche componenti PC di cui non si ricava lo sconto
   MERCHANT_ALLOW=amazon    negozi ammessi (separati da virgola); "*" = tutti i negozi
@@ -126,7 +126,7 @@ MAX_PER_RUN = int(env("MAX_PER_RUN", "40"))              # massimo di messaggi p
 SEND_DELAY = float(env("SEND_DELAY", "2.1"))             # pausa tra messaggi (Discord: max 30 al minuto per webhook)
 CURATED_SEND = env("CURATED_SEND", "1") == "1"       # 1 = invia le segnalazioni dei canali curati anche senza sconto calcolabile
 EXCLUDE_USED = env("EXCLUDE_USED", "0") == "1"            # 1 = scarta le offerte Amazon Seconda Mano (canali Telegram)
-REPEAT_HOURS = float(env("REPEAT_HOURS", "0"))             # 0 = disattivato; >0 = non reinvia lo STESSO post identico (canale+titolo+prezzo) entro N ore
+REPEAT_HOURS = float(env("REPEAT_HOURS", "6"))             # 0 = disattivato; >0 = non reinvia lo STESSO post identico (canale+titolo+prezzo) entro N ore
 DEDUPE_HOURS = float(env("DEDUPE_HOURS", "24"))          # finestra anti-duplicati tra fonti diverse
 REPRICE_DROP = float(env("REPRICE_DROP", "3"))           # % di ulteriore ribasso per rinviare la stessa offerta
 ALLOWED_COUNTRIES = [c.strip().lower() for c in env("COUNTRIES", "it,es,fr,de").split(",") if c.strip()]  # solo canali Telegram
@@ -158,7 +158,7 @@ CATEGORIES = {
             r"\bram\b.*\b(?:kit|mhz|mt/s)\b", r"\b(?:kit|mhz|mt/s)\b.*\bram\b"],
     "Scheda video": [r"tarjeta\s+gr[aá]fica", r"carte\s+graphique", r"scheda\s+(?:video|grafica)",
                      r"\brtx\s?\d{4}", r"\bgtx\s?\d{3,4}", r"geforce", r"radeon\s+rx",
-                     r"\brx\s?\d{4}", r"\bgpu\b"],
+                     r"\brx\s?\d{4}"],
     "Alimentatore": [r"fuente\s+(?:de\s+alimentaci[oó]n|modular|atx|pc)", r"bloc\s+d.alimentation",
                      r"alimentation\s+(?:modulaire|atx|pc|80)", r"alimentatore", r"\bpsu\b",
                      r"80\s?\+?\s?plus"],
@@ -169,7 +169,7 @@ CATEGORIES = {
     "SSD / disco": [r"\bssd\b", r"\bnvme\b", r"\bm\.2\b", r"hard\s?disk", r"disque\s+dur", r"disco\s+duro"],
     "Raffreddamento": [r"thermalright", r"noctua", r"peerless\s+assassin", r"arctic\s+(?:freezer|liquid)", r"dissipatore", r"raffreddamento\s+(?:a\s+)?liquido", r"\baio\b", r"ventola", r"ventilador",
                        r"ventirad", r"watercooling"],
-    "Case": [r"\bcase\s+(?:pc|gaming)", r"pc\s+(?:gaming\s+)?case", r"mid[- ]?tower", r"full[- ]?tower",
+    "Case": [r"\bcase\b.{0,40}(?:atx|tower)", r"\bcase\s+(?:micro|mini|mid|full)", r"\bcase\s+(?:pc|gaming)", r"pc\s+(?:gaming\s+)?case", r"mid[- ]?tower", r"full[- ]?tower",
              r"bo[iî]tier\s+pc", r"torre\s+pc"],
     "Webcam": [r"\bwebcam\b"],
 }
@@ -419,6 +419,7 @@ _HEAD = ("Case", "Alimentatore", "Scheda madre")
 
 
 def classify(title):
+    title = title.replace("\u2011", "-").replace("\u2010", "-").replace("\u2013", "-")   # trattini tipografici
     if EXCLUDE_RE.search(title):
         return None
     if LAPTOP_RE.search(title) and SYSTEM_SPEC_RE.search(title):
