@@ -65,3 +65,5 @@ jobs:
           SEND_ALL: ${{ vars.SEND_ALL }}
           MAX_PER_RUN: ${{ vars.MAX_PER_RUN }}
           SEND_DELAY: ${{ vars.SEND_DELAY }}
+          REPEAT_HOURS: ${{ vars.REPEAT_HOURS }}
+          CATEGORIES_ONLY: ${{ vars.CATEGORIES_ONLY }}
