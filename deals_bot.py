@@ -24,6 +24,7 @@ Configurazione: variabili d'ambiente o file .env
   HISTORY_DAYS=90          finestra temporale dello storico (giorni)
   REF_FILE=reference_prices.json   prezzi di riferimento manuali (opzionale, vedi sotto)
   SEND_ALL=pc              pc = tutte le segnalazioni di componenti PC dei canali (predefinito) | all = ogni post | hw = ogni post dei canali hardware | 0 = filtri attivi
+  MAX_AGE_HOURS=6          post piu' vecchi di N ore non vengono inviati (0 = disattivato)
   MAX_PER_RUN=40           massimo di messaggi per esecuzione (il resto va al giro successivo); SEND_DELAY=2.1 = pausa in secondi
   CATEGORIES_ONLY=Scheda video,Scheda madre,RAM,SSD / disco   categorie ammesse ("*" = tutte)
   CURATED_SEND=1           1 = invia le segnalazioni dei canali Telegram curati; 0 = solo sconti/prezzi anomali
@@ -46,7 +47,8 @@ import statistics
 import sys
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import requests
@@ -122,6 +124,7 @@ SEND_ALL = "all" if _sa in ("1", "true", "all") else ("hw" if _sa == "hw" else (
 #       senza deduplicazione e senza filtro paese; resta il filtro categoria e il filtro negozio (solo Amazon)
 # all = ogni post con link, di qualsiasi categoria | hw = "all" solo per i canali dedicati all'hardware
 # 0   = filtri attivi (categoria, Amazon, paesi, duplicati)
+MAX_AGE_HOURS = float(env("MAX_AGE_HOURS", "6"))            # post piu' vecchi di N ore non vengono inviati (0 = disattivato)
 MAX_PER_RUN = int(env("MAX_PER_RUN", "40"))              # massimo di messaggi per esecuzione; il resto va al giro successivo
 SEND_DELAY = float(env("SEND_DELAY", "2.1"))             # pausa tra messaggi (Discord: max 30 al minuto per webhook)
 CURATED_SEND = env("CURATED_SEND", "1") == "1"       # 1 = invia le segnalazioni dei canali curati anche senza sconto calcolabile
@@ -353,6 +356,35 @@ def fetch_tg(feed):
     return items
 
 
+def _iso_utc(value):
+    """Data RSS/Atom -> stringa ISO in UTC ("" se non interpretabile)."""
+    if not value:
+        return ""
+    try:
+        try:
+            dt = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
+    except Exception:
+        return ""
+
+
+def age_hours(item):
+    ts = item.get("ts")
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+    except Exception:
+        return None
+
+
 def fetch_items(feed):
     if feed.get("type") == "tgchannel":
         return fetch_tg(feed)
@@ -384,6 +416,7 @@ def fetch_items(feed):
                 "title": title, "link": link, "feed_category": "",
                 "merchant": merchant, "price_txt": price_txt,
                 "price": parse_price(price_txt), "desc": desc, "source": feed["name"],
+                "ts": _iso_utc(e.findtext(ATOM + "updated") or e.findtext(ATOM + "published")),
             })
         return items
 
@@ -403,6 +436,7 @@ def fetch_items(feed):
             "price": parse_price(price_txt),
             "desc": desc,
             "source": feed["name"],
+            "ts": _iso_utc(it.findtext("pubDate")),
         })
     return items
 
@@ -802,25 +836,41 @@ def run_once(dry=False):
         for it in reversed(new_items):
             record_price(it)
     else:
-        sent_now, processed = 0, []
-        for it in reversed(new_items):  # dalla piu' vecchia alla piu' recente
-            if sent_now >= MAX_PER_RUN:
-                break   # il resto resta "non visto" e viene inviato al giro successivo
+        new_items.sort(key=lambda it: it.get("ts") or "", reverse=True)   # dal piu' recente al piu' vecchio
+        queue, processed, stale = [], [], 0
+        for it in new_items:
+            age = age_hours(it)
+            if MAX_AGE_HOURS > 0 and age is not None and age > MAX_AGE_HOURS:
+                stale += 1
+                processed.append(it["guid"])        # troppo vecchio: segnato come visto, non inviato
+                continue
             d = evaluate(it)
-            if d and is_duplicate(it, d["category"]):
+            if not d:
+                record_price(it)
+                processed.append(it["guid"])
+                continue
+            if len(queue) >= MAX_PER_RUN:
+                print(f"Limite di {MAX_PER_RUN} messaggi raggiunto: i rimanenti vanno al prossimo giro.")
+                break                               # il resto resta "non visto" (se ancora recente verra' inviato)
+            queue.append((it, d))
+            processed.append(it["guid"])
+        if stale:
+            print(f"  {stale} post piu' vecchi di {MAX_AGE_HOURS:g} ore ignorati")
+        appended = set()
+        for it, d in reversed(queue):               # invio in ordine cronologico
+            if is_duplicate(it, d["category"]):
                 print(f"  duplicato saltato: {it['title'][:70]}")
-                d = None
-            elif d:
+                record_price(it)
+            else:
                 print(f"  INVIO [{d['kind']}] {it['title'][:80]}")
                 notify(build_message(it, d))
                 mark_sent(it, d["category"])
-                sent_now += 1
-            if not d or d["kind"] not in ("error", "anomaly"):
-                record_price(it)   # i prezzi anomali non entrano nello storico
-            processed.append(it["guid"])
-        if sent_now >= MAX_PER_RUN:
-            print(f"Limite di {MAX_PER_RUN} messaggi raggiunto: i rimanenti vanno al prossimo giro.")
-        new_items = [it for it in new_items if it["guid"] in set(processed)]
+                if d["kind"] not in ("error", "anomaly"):
+                    record_price(it)                # i prezzi anomali non entrano nello storico
+            seen.append(it["guid"])
+            appended.add(it["guid"])
+            save_state(seen)                        # salvataggio a ogni messaggio: niente reinvii se il job si interrompe
+        new_items = [{"guid": g} for g in processed if g not in appended]
     seen.extend(it["guid"] for it in new_items)
     save_state(seen)
 
