@@ -25,6 +25,7 @@ Configurazione: variabili d'ambiente o file .env
   REF_FILE=reference_prices.json   prezzi di riferimento manuali (opzionale, vedi sotto)
   SEND_ALL=pc              pc = tutte le segnalazioni di componenti PC dei canali (predefinito) | all = ogni post | hw = ogni post dei canali hardware | 0 = filtri attivi
   MAX_PER_RUN=40           massimo di messaggi per esecuzione (il resto va al giro successivo); SEND_DELAY=2.1 = pausa in secondi
+  CATEGORIES_ONLY=Scheda video,Scheda madre,RAM,SSD / disco   categorie ammesse ("*" = tutte)
   CURATED_SEND=1           1 = invia le segnalazioni dei canali Telegram curati; 0 = solo sconti/prezzi anomali
   COUNTRIES=it,es,fr,de    marketplace ammessi per i canali Telegram (de = Amazon.de)
   EXTRA_CATEGORIES=1       1 = include accessori PC e rete; 0 = solo le categorie principali
@@ -105,6 +106,12 @@ SEND_UNKNOWN = env("SEND_UNKNOWN", "0") == "1"
 _allow_raw = env("MERCHANT_ALLOW", "amazon")   # default: solo Amazon ("*" = tutti i negozi)
 MERCHANT_ALLOW = [] if _allow_raw.strip() == "*" else [m.strip().lower() for m in _allow_raw.split(",") if m.strip()]
 MERCHANT_BLOCK = [m.strip().lower() for m in env("MERCHANT_BLOCK", "").split(",") if m.strip()]
+_ALIASES = {"schede video": "Scheda video", "scheda video": "Scheda video", "gpu": "Scheda video",
+            "schede madri": "Scheda madre", "scheda madre": "Scheda madre", "ram": "RAM",
+            "ssd": "SSD / disco", "ssd / disco": "SSD / disco", "dischi": "SSD / disco"}
+_only = env("CATEGORIES_ONLY", "Scheda video,Scheda madre,RAM,SSD / disco")   # "*" = tutte le categorie
+ONLY_CATEGORIES = set() if _only.strip() in ("*", "all", "tutte") else \
+    {_ALIASES.get(c.strip().lower(), c.strip()) for c in _only.split(",") if c.strip()}
 STATE_FILE = Path(env("STATE_FILE", "deals_state.json"))
 LOOP = env("LOOP", "0") == "1"
 INTERVAL = max(60, int(env("INTERVAL_SECONDS", "300")))
@@ -185,7 +192,7 @@ CATEGORY_RE = {c: re.compile("|".join(p), re.I) for c, p in CATEGORIES.items()}
 EXCLUDE_RE = re.compile(
     r"beb[eé]|\bbaby\b|b[eé]b[eé]|tensi[oó]n\s+arterial|presi[oó]n\s+arterial|gluc[oó]|"
     r"tension\s+art[eé]rielle|pressione|\bgatos?\b|\bperros?\b|"
-    r"\bmini\s?pc\b|gaming\s+pc\b|pc\s+(?:desktop|fisso|gaming\s+completo)|desktop\s+pc|barebone|bosgame|chuwi|minisforum|beelink|geekom|\bwatch\b|ciotola|animali|\bcane\b|\bgatto\b|\btablet\b|smartphone|cellulare|\biphone\b|\bkindle\b|\bfire\s?tv\b|smart\s?watch|controller\s+(?:di\s+gioco\s+)?(?:mobile|smartphone|per\s+(?:smartphone|telefono))|geforce\s+now|pc\s+portable|port[aá]til|portatile|\blaptop\b|\bnotebook\b|\bzenbook\b|\bmacbook\b|"
+    r"\bmini\s?pc\b|barebone|bosgame|chuwi|minisforum|beelink|geekom|\bwatch\b|ciotola|animali|\bcane\b|\bgatto\b|\btablet\b|smartphone|cellulare|\biphone\b|\bkindle\b|\bfire\s?tv\b|smart\s?watch|controller\s+(?:di\s+gioco\s+)?(?:mobile|smartphone|per\s+(?:smartphone|telefono))|geforce\s+now|msi\s+claw|steam\s+deck|rog\s+ally|legion\s+go|\bhandheld\b|console\s+(?:portatile|da\s+gioco)|"
     r"\bfunda\b|housse|cover\s+per|custodia", re.I)
 
 ERROR_KEYWORDS_RE = re.compile(
@@ -400,6 +407,13 @@ def fetch_items(feed):
     return items
 
 
+LAPTOP_RE = re.compile(r"laptop|notebook|portatile|port[aá]til|pc\s+portable|zenbook|macbook|galaxy\s+book|thinkpad|ideapad|chromebook", re.I)
+SYSTEM_SPEC_RE = re.compile(
+    r"ryzen\s*\d|core\s+(?:ultra\s+)?i?\d|snapdragon|celeron|pentium|\bapple\s+m\d|\brtx\s?\d{4}|\bgtx\s?\d{3,4}|radeon\s+rx|"
+    r"\d{2}[.,]?\d?\s?(?:\"|pollici|zoll|inch)|\bdisplay\b|schermo|batteria", re.I)
+DESKTOP_RE = re.compile(r"gaming\s+pc\b|pc\s+(?:desktop|fisso|gaming\s+completo)|desktop\s+pc", re.I)
+CPU_SPEC_RE = re.compile(r"ryzen\s*\d|core\s+(?:ultra\s+)?i?\d|celeron|pentium|\bn100\b", re.I)
+MOBO_RE = re.compile(r"scheda\s+madre|motherboard|placa\s+base|carte\s+m[eè]re", re.I)
 GPU_STRONG_RE = re.compile(r"\b(?:rtx|gtx)\s?\d{3,4}|\brx\s?\d{4}|radeon\s+rx|geforce\s+(?:rtx|gtx)|\barc\s+[ab]\d{3}", re.I)
 _HEAD = ("Case", "Alimentatore", "Scheda madre")
 
@@ -407,6 +421,10 @@ _HEAD = ("Case", "Alimentatore", "Scheda madre")
 def classify(title):
     if EXCLUDE_RE.search(title):
         return None
+    if LAPTOP_RE.search(title) and SYSTEM_SPEC_RE.search(title):
+        return None   # portatile completo (non un componente "per laptop")
+    if DESKTOP_RE.search(title) and CPU_SPEC_RE.search(title) and not MOBO_RE.search(title):
+        return None   # PC desktop completo (non un componente "per PC desktop")
     gpu_checked = False
     for cat, rx in CATEGORY_RE.items():
         if not gpu_checked and cat not in _HEAD:
@@ -596,6 +614,8 @@ PRICE_FLOORS = [
     ("Scheda madre", 40, re.compile(r"scheda\s+madre|placa\s+base|carte\s+m[eè]re|motherboard", re.I)),
     ("CPU", 45, re.compile(r"\bryzen\s+\d|core\s+(?:ultra\s+)?i[3579]|core\s+ultra\s+\d", re.I)),
     ("Monitor", 45, re.compile(r"\bmonitor\b|\becran\b|schermo", re.I)),
+    ("RAM", 30, re.compile(r"ddr5.*\b(?:32|64)\s?gb|\b(?:32|64)\s?gb.*ddr5", re.I)),
+    ("SSD / disco", 25, re.compile(r"\bssd\b.*\b[124]\s?tb\b|\b[124]\s?tb\b.*\bssd\b|nvme.*\b[12]\s?tb\b", re.I)),
     ("Alimentatore", 15, re.compile(r"alimentatore|fuente\s+de\s+alimentaci|bloc\s+d.alimentation", re.I)),
 ]
 
@@ -614,6 +634,8 @@ def evaluate(item):
     any_cat = bool(item.get("any_category"))
     cat = classify(item["title"]) or ("Altro" if any_cat else None)
     if not cat or not (any_cat or merchant_allowed(item["merchant"])):
+        return None
+    if ONLY_CATEGORIES and cat not in ONLY_CATEGORIES and not any_cat:
         return None
     discount, orig = extract_discount(item["title"], item["desc"], item["price"])
     text = f"{item['title']} {item['desc'][:400]}"
